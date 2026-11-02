@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+data/conversations.json
+backend/data/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+/build/
+/dist/
+*.log
+.edge-docs-profile/
+.edge-layout-profile/
+
