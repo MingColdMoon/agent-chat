@@ -7,6 +7,7 @@ import {
   BriefcaseBusiness,
   ChartNoAxesCombined,
   Check,
+  Cpu,
   FileText,
   Headset,
   LoaderCircle,
@@ -56,6 +57,7 @@ const iconMap = {
   sparkles: Sparkles,
   document: FileText,
   business: BriefcaseBusiness,
+  cpu: Cpu,
 }
 
 const iconOptions = [

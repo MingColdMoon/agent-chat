@@ -147,7 +147,7 @@ def create_app(
 
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
-        tools = ["get_current_time", "calculator"]
+        tools = ["get_current_time", "calculator", "generate_pc_build"]
         if settings.tavily_api_key:
             tools.append("web_search")
         server_credentials = []
@@ -479,14 +479,59 @@ async def _execute_run(
     runs: RunManager,
     runtime: RuntimeConfig,
 ) -> None:
+    agui_activity: dict[str, Any] | None = None
+
     async def emit(event_type: str, payload: dict[str, Any]) -> None:
         await runs.publish(run, event_type, **payload)
+        if event_type == "assistant.delta":
+            await runs.publish(
+                run,
+                "TEXT_MESSAGE_CONTENT",
+                messageId=assistant_id,
+                delta=payload["delta"],
+            )
+        elif event_type == "tool.started":
+            tool = payload["tool"]
+            await runs.publish(
+                run,
+                "TOOL_CALL_START",
+                toolCallId=tool["id"],
+                toolCallName=tool["name"],
+                parentMessageId=assistant_id,
+            )
+        elif event_type == "tool.finished":
+            tool = payload["tool"]
+            await runs.publish(
+                run,
+                "TOOL_CALL_END",
+                toolCallId=tool["id"],
+            )
+            await runs.publish(
+                run,
+                "TOOL_CALL_RESULT",
+                messageId=f"tool-{tool['id']}",
+                toolCallId=tool["id"],
+                content=json.dumps(tool.get("output"), ensure_ascii=False),
+                role="tool",
+            )
 
     try:
         conversation = await store.get(user_id, conversation_id)
         if conversation is None:
             raise RuntimeError("会话已被删除")
 
+        await runs.publish(
+            run,
+            "RUN_STARTED",
+            threadId=conversation_id,
+            runId=run.id,
+        )
+        await runs.publish(
+            run,
+            "TEXT_MESSAGE_START",
+            messageId=assistant_id,
+            role="assistant",
+        )
         answer, tools = await agent.run(
             conversation.messages,
             emit,
@@ -495,6 +540,33 @@ async def _execute_run(
             agent_key=conversation.agent.key if conversation.agent else None,
             agent_prompt=conversation.agent_prompt,
         )
+        pc_build_trace = next(
+            (
+                trace
+                for trace in reversed(tools)
+                if trace.name == "generate_pc_build"
+                and isinstance(trace.output, dict)
+            ),
+            None,
+        )
+        if pc_build_trace:
+            agui_activity = {
+                "activityType": "pc-build-plan",
+                "content": pc_build_trace.output,
+            }
+            await runs.publish(
+                run,
+                "STATE_SNAPSHOT",
+                snapshot={"pcBuild": pc_build_trace.output},
+            )
+            await runs.publish(
+                run,
+                "ACTIVITY_SNAPSHOT",
+                messageId=assistant_id,
+                activityType="pc-build-plan",
+                content=pc_build_trace.output,
+                replace=True,
+            )
         assistant_message = Message(
             id=assistant_id,
             role="assistant",
@@ -503,6 +575,7 @@ async def _execute_run(
             tools=tools,
             provider=runtime.provider,
             model=runtime.model or "demo",
+            activity=agui_activity,
         )
         await store.add_message(
             user_id,
@@ -514,13 +587,39 @@ async def _execute_run(
             "assistant.final",
             message=assistant_message.model_dump(mode="json"),
         )
+        await runs.publish(
+            run,
+            "TEXT_MESSAGE_END",
+            messageId=assistant_id,
+        )
+        await runs.publish(
+            run,
+            "RUN_FINISHED",
+            threadId=conversation_id,
+            runId=run.id,
+            result={
+                "messageId": assistant_id,
+                "activity": agui_activity,
+            },
+        )
         await runs.publish(run, "done")
         await runs.finish(run)
     except Exception as error:
         await runs.publish(
             run,
+            "RUN_ERROR",
+            message=str(error) or "Agent 运行失败",
+            code="AGENT_RUN_ERROR",
+        )
+        await runs.publish(
+            run,
             "run.error",
             error=str(error) or "Agent 运行失败",
+        )
+        await runs.publish(
+            run,
+            "TEXT_MESSAGE_END",
+            messageId=assistant_id,
         )
         await runs.publish(run, "done")
         await runs.finish(run, status="error")

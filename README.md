@@ -9,7 +9,8 @@
 
 ### 智能体广场
 
-- 默认内置 **智能客服** 和 **智能自动化报表** 两个智能体。
+- 默认内置 **智能客服**、**智能自动化报表** 和 **装机大师**。
+- 装机大师使用 AG-UI 活动事件展示可交互装机配置与硬件清单。
 - 用户可以创建自己的智能体，配置名称、分类、图标、简介和系统指令。
 - 自定义智能体只对创建者可见。
 - 可以开始一个新智能体会话，也可以把智能体应用到当前会话。
@@ -55,6 +56,12 @@
 
 ![智能体对话](docs/images/conversation.png)
 
+### 装机大师可视化配置
+
+![装机大师配置器](docs/images/pc-builder-empty.png)
+
+![AG-UI 装机方案](docs/images/pc-builder-plan.png)
+
 ### 用户登录
 
 ![用户登录](docs/images/login-desktop.png)
@@ -68,7 +75,8 @@
 | 模块 | 技术 |
 | --- | --- |
 | 前端 | Vue 3、TypeScript、Vite、Lucide Icons、MarkdownIt |
-| 后端 | Python 3.12、FastAPI、LangChain、LangGraph-compatible tool loop |
+| 后端 | Python 3.12、FastAPI、LangChain tool-calling loop |
+| 交互协议 | AG-UI 兼容事件子集、SSE、共享状态与活动快照 |
 | 模型 | ChatOpenAI、OpenAI/DeepSeek/自定义兼容接口 |
 | 搜索 | Tavily API |
 | 认证 | PyJWT、Argon2、Redis Token 吊销 |
@@ -168,13 +176,15 @@ API Key 只保存在当前标签页的 `sessionStorage`，不会写入 PostgreSQ
 ## 智能体使用
 
 1. 登录后点击侧边栏“智能体广场”。
-2. 选择内置智能体“智能客服”或“智能自动化报表”。
+2. 选择内置智能体“智能客服”“智能自动化报表”或“装机大师”。
 3. 点击“开始对话”创建新会话，或点击“应用到当前”切换当前会话角色。
 4. 点击“创建智能体”定义自己的角色和系统指令。
 5. 自定义智能体会出现在“我的智能体”区域，仅当前用户可见。
 
 真实模型模式下，智能体系统指令会注入 LangChain `SystemMessage`。演示模式下，
-内置智能体会返回对应的客服或报表示例回答，便于无 API Key 验证完整流程。
+内置智能体会返回对应的客服、报表或装机示例回答，便于无 API Key 验证完整流程。
+装机大师通过 AG-UI 的 `STATE_SNAPSHOT` 与 `ACTIVITY_SNAPSHOT` 渲染预算滑杆、
+用途选择器、硬件清单和兼容性提示。
 
 ## 本地开发
 
@@ -237,6 +247,8 @@ agent-chat/
 │   │   │   ├── AuthScreen.vue
 │   │   │   ├── ChatMessage.vue
 │   │   │   ├── ConversationSidebar.vue
+│   │   │   ├── PcBuildCard.vue
+│   │   │   ├── PcBuilderConfigurator.vue
 │   │   │   └── SettingsPanel.vue
 │   │   └── ...
 │   ├── Dockerfile
@@ -277,6 +289,7 @@ agent-chat/
 ## 详细文档
 
 - [智能体广场实现说明](docs/agent-marketplace.md)
+- [装机大师与 AG-UI 实现说明](docs/agui-pc-builder.md)
 - [JWT 登录、PostgreSQL 与 Redis 实现说明](docs/auth-redis-postgresql.md)
 
 ## 生产化建议

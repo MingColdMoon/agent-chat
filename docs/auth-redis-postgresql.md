@@ -357,7 +357,7 @@ uv run pytest -q
 
 ```text
 ...........                                                              [100%]
-11 passed
+16 passed
 ```
 
 覆盖：

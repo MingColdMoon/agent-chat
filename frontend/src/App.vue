@@ -21,6 +21,7 @@ import AgentMarketplace from './components/AgentMarketplace.vue'
 import AuthScreen from './components/AuthScreen.vue'
 import ChatMessage from './components/ChatMessage.vue'
 import ConversationSidebar from './components/ConversationSidebar.vue'
+import PcBuilderConfigurator from './components/PcBuilderConfigurator.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import {
   createConversation,
@@ -697,7 +698,21 @@ function handleStreamEvent(
     if (event.type === 'assistant.final' && event.message) {
       message.content = event.message.content
       message.tools = event.message.tools
+      message.activity = event.message.activity
       message.streaming = false
+      scrollToBottom()
+      return
+    }
+
+    if (
+      event.type === 'ACTIVITY_SNAPSHOT' &&
+      event.activityType &&
+      event.content
+    ) {
+      message.activity = {
+        activityType: event.activityType,
+        content: event.content,
+      }
       scrollToBottom()
       return
     }
@@ -999,8 +1014,19 @@ onBeforeUnmount(() => {
           <span class="empty-icon" aria-hidden="true">
             <MessageSquareText :size="24" :stroke-width="1.7" />
           </span>
-          <h2>今天想了解什么？</h2>
-          <div class="suggestion-list">
+          <h2>
+            {{
+              currentAgent?.key === 'pc-builder'
+                ? '告诉我你的装机需求'
+                : '今天想了解什么？'
+            }}
+          </h2>
+          <PcBuilderConfigurator
+            v-if="currentAgent?.key === 'pc-builder'"
+            :disabled="busy"
+            @submit="useSuggestion"
+          />
+          <div v-else class="suggestion-list">
             <button
               v-for="suggestion in suggestions"
               :key="suggestion.label"

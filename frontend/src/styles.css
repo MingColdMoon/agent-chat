@@ -1488,6 +1488,11 @@ textarea:focus-visible {
   color: #74528a;
 }
 
+.agent-icon.icon-cpu {
+  background: #e7efe2;
+  color: #466b35;
+}
+
 .agent-badge {
   padding: 3px 6px;
   border: 1px solid var(--line);
@@ -1704,6 +1709,307 @@ textarea:focus-visible {
   position: absolute;
   right: 2px;
   bottom: 2px;
+}
+
+.pc-configurator {
+  width: min(720px, 100%);
+  margin-top: 2px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--page);
+}
+
+.pc-configurator-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.pc-configurator-head span {
+  color: var(--warm);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.pc-configurator-head h3 {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 680;
+}
+
+.pc-configurator-head output {
+  color: var(--accent-strong);
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.budget-control {
+  display: grid;
+  gap: 5px;
+  margin-top: 18px;
+}
+
+.budget-control > span,
+.pc-config-row > span {
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.budget-control input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.budget-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.pc-config-row {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.pc-use-cases {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.pc-use-cases button,
+.pc-priorities button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.pc-use-cases button {
+  min-height: 38px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.pc-use-cases button:hover,
+.pc-use-cases button.active,
+.pc-priorities button:hover,
+.pc-priorities button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.pc-priorities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pc-priorities button {
+  min-height: 31px;
+  padding: 0 10px;
+  font-size: 9px;
+}
+
+.pc-build-submit {
+  display: flex;
+  width: 100%;
+  height: 39px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 18px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.pc-build-submit:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.pc-build-submit:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.pc-build-card {
+  margin: 14px 0 4px 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--page);
+  overflow: hidden;
+}
+
+.pc-build-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.pc-build-kicker {
+  color: var(--warm);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.pc-build-head h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+}
+
+.pc-build-total {
+  text-align: right;
+}
+
+.pc-build-total span,
+.pc-build-total strong {
+  display: block;
+}
+
+.pc-build-total span {
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+
+.pc-build-total strong {
+  margin-top: 2px;
+  color: var(--accent-strong);
+  font-family: var(--mono);
+  font-size: 20px;
+}
+
+.pc-build-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.pc-build-summary span {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.pc-component-list {
+  display: grid;
+  padding: 4px 16px;
+}
+
+.pc-component {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pc-component:last-child {
+  border-bottom: 0;
+}
+
+.pc-component-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent-strong);
+}
+
+.pc-component div > span,
+.pc-component div > strong,
+.pc-component div > small {
+  display: block;
+}
+
+.pc-component div > span {
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+
+.pc-component div > strong {
+  margin-top: 1px;
+  font-size: 11px;
+}
+
+.pc-component div > small {
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 8px;
+}
+
+.pc-component > b {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.pc-build-notes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 13px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.pc-build-notes strong {
+  font-size: 9px;
+}
+
+.pc-build-notes ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: var(--ink-soft);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.pc-build-notes p {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.pc-build-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 8px;
 }
 
 .settings-layer {
@@ -2182,6 +2488,31 @@ textarea:focus-visible {
 
   .agent-create-body {
     padding: 5px 14px 22px;
+  }
+
+  .pc-configurator {
+    padding: 14px;
+  }
+
+  .pc-use-cases {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pc-build-card {
+    margin-left: 0;
+  }
+
+  .pc-build-head {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .pc-build-total {
+    text-align: left;
+  }
+
+  .pc-build-notes {
+    grid-template-columns: 1fr;
   }
 
   .settings-panel {

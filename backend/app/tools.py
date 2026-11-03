@@ -77,6 +77,181 @@ def calculator(expression: str) -> str:
     return f"{result:.12g}"
 
 
+@tool
+def generate_pc_build(
+    budget: int,
+    use_case: str,
+    priorities: str = "",
+) -> dict[str, Any]:
+    """按预算和用途生成一套兼容的台式机装机方案。
+
+    budget 为人民币预算，use_case 支持 gaming、productivity、ai、balanced
+    或对应中文描述，priorities 可填写静音、外观、扩展性等偏好。
+    价格均为预估价，不是实时市场报价。
+    """
+    normalized_budget = max(4000, min(30000, int(budget)))
+    normalized_case = _normalize_pc_use_case(use_case)
+    case_label = {
+        "gaming": "游戏娱乐",
+        "productivity": "生产力",
+        "ai": "AI 与本地模型",
+        "balanced": "均衡全能",
+    }[normalized_case]
+
+    cpu_ratio, gpu_ratio = {
+        "gaming": (0.16, 0.39),
+        "productivity": (0.25, 0.22),
+        "ai": (0.16, 0.43),
+        "balanced": (0.2, 0.31),
+    }[normalized_case]
+    cpu_price = max(650, normalized_budget * cpu_ratio)
+    gpu_price = max(1500, normalized_budget * gpu_ratio)
+
+    if normalized_case == "gaming":
+        cpu = (
+            "AMD Ryzen 7 7800X3D"
+            if normalized_budget >= 11000
+            else "Intel Core i5-14600KF"
+            if normalized_budget >= 7500
+            else "Intel Core i5-12400F"
+        )
+        gpu = (
+            "NVIDIA RTX 4070 Ti SUPER 16GB"
+            if normalized_budget >= 15000
+            else "NVIDIA RTX 4070 SUPER 12GB"
+            if normalized_budget >= 9500
+            else "NVIDIA RTX 4060 Ti 8GB"
+            if normalized_budget >= 6500
+            else "NVIDIA RTX 3060 12GB"
+        )
+        motherboard = "B650M" if cpu.startswith("AMD") else "B760M"
+    elif normalized_case == "ai":
+        cpu = (
+            "AMD Ryzen 9 7900X"
+            if normalized_budget >= 12000
+            else "AMD Ryzen 7 7700"
+        )
+        gpu = (
+            "NVIDIA RTX 4070 Ti SUPER 16GB"
+            if normalized_budget >= 14000
+            else "NVIDIA RTX 4060 Ti 16GB"
+        )
+        motherboard = "B650M"
+    elif normalized_case == "productivity":
+        cpu = (
+            "AMD Ryzen 9 7900X"
+            if normalized_budget >= 10000
+            else "Intel Core i5-14600K"
+        )
+        gpu = (
+            "NVIDIA RTX 4070 SUPER 12GB"
+            if normalized_budget >= 10000
+            else "NVIDIA RTX 4060 8GB"
+        )
+        motherboard = "B650M" if cpu.startswith("AMD") else "B760M"
+    else:
+        cpu = "Intel Core i5-14600KF"
+        gpu = (
+            "NVIDIA RTX 4070 SUPER 12GB"
+            if normalized_budget >= 10000
+            else "NVIDIA RTX 4060 Ti 8GB"
+        )
+        motherboard = "B760M"
+
+    ram_size = "64GB" if normalized_case == "ai" and normalized_budget >= 12000 else "32GB"
+    ssd_size = "2TB" if normalized_budget >= 9000 else "1TB"
+    psu_wattage = 850 if normalized_budget >= 10000 else 650
+    cooler = (
+        "360mm 一体式水冷"
+        if normalized_budget >= 12000
+        else "双塔风冷"
+    )
+    remaining_ratio = 1 - cpu_ratio - gpu_ratio
+    component_prices = {
+        "CPU": cpu_price,
+        "显卡": gpu_price,
+        "主板": normalized_budget * remaining_ratio * 0.24,
+        "内存": normalized_budget * remaining_ratio * 0.18,
+        "固态硬盘": normalized_budget * remaining_ratio * 0.2,
+        "电源": normalized_budget * remaining_ratio * 0.14,
+        "散热器": normalized_budget * remaining_ratio * 0.12,
+        "机箱": normalized_budget * remaining_ratio * 0.12,
+    }
+    components = [
+        {
+            "category": "CPU",
+            "name": cpu,
+            "price": _pc_price(component_prices["CPU"]),
+            "reason": "匹配主要用途的多核与单核性能需求",
+        },
+        {
+            "category": "显卡",
+            "name": gpu,
+            "price": _pc_price(component_prices["显卡"]),
+            "reason": "优先保证图形性能与显存容量",
+        },
+        {
+            "category": "主板",
+            "name": f"{motherboard} 主板",
+            "price": _pc_price(component_prices["主板"]),
+            "reason": "接口与供电满足当前平台",
+        },
+        {
+            "category": "内存",
+            "name": f"{ram_size} DDR5 6000",
+            "price": _pc_price(component_prices["内存"]),
+            "reason": "双通道容量满足多任务与模型加载",
+        },
+        {
+            "category": "固态硬盘",
+            "name": f"{ssd_size} PCIe 4.0 NVMe",
+            "price": _pc_price(component_prices["固态硬盘"]),
+            "reason": "兼顾容量、顺序读写和日常响应",
+        },
+        {
+            "category": "电源",
+            "name": f"{psu_wattage}W 80 PLUS Gold",
+            "price": _pc_price(component_prices["电源"]),
+            "reason": "预留显卡瞬态功耗与升级余量",
+        },
+        {
+            "category": "散热器",
+            "name": cooler,
+            "price": _pc_price(component_prices["散热器"]),
+            "reason": "压制高负载温度并兼顾噪声",
+        },
+        {
+            "category": "机箱",
+            "name": "中塔风道机箱",
+            "price": _pc_price(component_prices["机箱"]),
+            "reason": "保证显卡长度、散热器和走线空间",
+        },
+    ]
+    total = sum(component["price"] for component in components)
+    return {
+        "title": f"{case_label}装机方案",
+        "use_case": case_label,
+        "budget": normalized_budget,
+        "total_price": total,
+        "budget_delta": normalized_budget - total,
+        "price_basis": "预估参考价，非实时市场报价",
+        "priorities": [
+            item.strip()
+            for item in priorities.replace("，", ",").split(",")
+            if item.strip()
+        ],
+        "components": components,
+        "compatibility_notes": [
+            "内存建议开启 EXPO/XMP 并验证稳定性。",
+            "显卡长度和散热器高度需在购买前对照机箱参数。",
+            "高负载使用建议增加机箱进出风风扇。",
+        ],
+        "upgrade_path": (
+            "优先升级存储和内存；后续可更换同平台更高一级显卡。"
+        ),
+    }
+
+
 TOOLS = [get_current_time, calculator]
 TOOL_MAP = {item.name: item for item in TOOLS}
 
@@ -169,8 +344,11 @@ def tools_for_runtime(
     web_search_enabled: bool,
     tavily_api_key: str | None,
     tavily_api_url: str | None,
+    agent_key: str | None = None,
 ) -> list[Any]:
     tools: list[Any] = [*TOOLS]
+    if agent_key == "pc-builder":
+        tools.append(generate_pc_build)
     if web_search_enabled and tavily_api_key:
         tools.append(
             create_tavily_tool(
@@ -179,4 +357,22 @@ def tools_for_runtime(
             )
         )
     return tools
+
+
+def _normalize_pc_use_case(value: str) -> str:
+    normalized = value.lower()
+    if any(keyword in normalized for keyword in ("游戏", "gaming", "game")):
+        return "gaming"
+    if any(keyword in normalized for keyword in ("ai", "模型", "训练", "推理")):
+        return "ai"
+    if any(
+        keyword in normalized
+        for keyword in ("生产", "办公", "剪辑", "渲染", "productivity")
+    ):
+        return "productivity"
+    return "balanced"
+
+
+def _pc_price(value: float) -> int:
+    return max(50, int(round(value / 50) * 50))
 

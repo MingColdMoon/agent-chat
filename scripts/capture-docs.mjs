@@ -234,6 +234,50 @@ await waitFor("document.querySelector('.agent-create-panel')")
 await new Promise((resolve) => setTimeout(resolve, 450))
 await capture('create-agent.png')
 
+await evaluate(`
+  document.querySelector('.agent-create-panel .settings-header .icon-button').click()
+`)
+await waitFor("!document.querySelector('.agent-create-panel')")
+await evaluate(`
+  (() => {
+    const card = [...document.querySelectorAll('.agent-card')].find(
+      (item) => item.querySelector('h3')?.textContent.trim() === '装机大师'
+    );
+    card.querySelector('.agent-primary-action').click();
+  })()
+`)
+await waitFor("document.querySelector('.pc-configurator')")
+await new Promise((resolve) => setTimeout(resolve, 300))
+await capture('pc-builder-empty.png')
+
+await evaluate(`
+  (() => {
+    const range = document.querySelector('.budget-control input');
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    ).set;
+    setter.call(range, '10000');
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+    range.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('.pc-build-submit').click();
+  })()
+`)
+await waitFor("document.querySelector('.pc-build-card')", 25_000)
+await new Promise((resolve) => setTimeout(resolve, 300))
+await evaluate(`
+  (() => {
+    const scroller = document.querySelector('.message-scroller');
+    const card = document.querySelector('.pc-build-card');
+    scroller.scrollTop +=
+      card.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      88;
+  })()
+`)
+await new Promise((resolve) => setTimeout(resolve, 150))
+await capture('pc-builder-plan.png')
+
 await send('Emulation.clearDeviceMetricsOverride')
 console.log(`Documentation screenshots written to ${outputDir}`)
 

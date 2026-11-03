@@ -251,6 +251,7 @@ def test_builtin_agents_are_seeded_for_every_user(tmp_path: Path) -> None:
     assert [agent["name"] for agent in agents] == [
         "智能客服",
         "智能自动化报表",
+        "装机大师",
     ]
     assert all(agent["is_builtin"] for agent in agents)
 
@@ -393,4 +394,53 @@ def test_builtin_customer_service_uses_agent_persona(tmp_path: Path) -> None:
 
     assert "智能客服" in stream_body
     assert "订单号" in stream_body
+
+
+def test_pc_builder_emits_agui_activity_and_persists_plan(
+    tmp_path: Path,
+) -> None:
+    with build_app(tmp_path) as client:
+        auth = register(client)
+        headers = auth_headers(auth["access_token"])
+        agents = client.get("/api/agents", headers=headers).json()["agents"]
+        pc_builder = next(
+            agent for agent in agents if agent["key"] == "pc-builder"
+        )
+        conversation = client.post(
+            "/api/conversations",
+            headers=headers,
+            json={"agent_id": pc_builder["id"]},
+        ).json()["conversation"]
+        sent = client.post(
+            f"/api/conversations/{conversation['id']}/messages",
+            headers=headers,
+            json={
+                "content": "预算：10000 元；用途：游戏；偏好：静音、外观",
+                "runtime": {"provider": "demo"},
+            },
+        )
+        stream_body = read_stream(
+            client,
+            sent.json()["stream_url"],
+            auth["access_token"],
+        )
+        stored = client.get(
+            f"/api/conversations/{conversation['id']}",
+            headers=headers,
+        ).json()["conversation"]
+
+    for event_type in (
+        "RUN_STARTED",
+        "TEXT_MESSAGE_CONTENT",
+        "TOOL_CALL_START",
+        "TOOL_CALL_RESULT",
+        "STATE_SNAPSHOT",
+        "ACTIVITY_SNAPSHOT",
+        "RUN_FINISHED",
+    ):
+        assert f'"type": "{event_type}"' in stream_body
+    assistant = stored["messages"][-1]
+    assert assistant["activity"]["activityType"] == "pc-build-plan"
+    assert assistant["activity"]["content"]["use_case"] == "游戏娱乐"
+    assert len(assistant["activity"]["content"]["components"]) == 8
 

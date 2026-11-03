@@ -126,6 +126,11 @@ class MessageRecord(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    activity: Mapped[dict[str, Any] | None] = mapped_column(
+        "agui_activity",
+        JSON_VALUE,
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now_datetime,
@@ -168,6 +173,12 @@ class Database:
                         "CREATE INDEX IF NOT EXISTS "
                         "ix_conversations_agent_id "
                         "ON conversations (agent_id)"
+                    )
+                )
+                await connection.execute(
+                    text(
+                        "ALTER TABLE messages "
+                        "ADD COLUMN IF NOT EXISTS agui_activity JSONB"
                     )
                 )
 

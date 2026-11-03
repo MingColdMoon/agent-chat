@@ -69,6 +69,7 @@ export interface Message {
   streaming?: boolean
   provider?: string
   model?: string
+  activity?: AgUiActivity | null
 }
 
 export interface AgentSummary {
@@ -88,6 +89,31 @@ export interface AgentCreatePayload {
   category: string
   icon: string
   instructions: string
+}
+
+export interface PcBuildComponent {
+  category: string
+  name: string
+  price: number
+  reason: string
+}
+
+export interface PcBuildPlan {
+  title: string
+  use_case: string
+  budget: number
+  total_price: number
+  budget_delta: number
+  price_basis: string
+  priorities: string[]
+  components: PcBuildComponent[]
+  compatibility_notes: string[]
+  upgrade_path: string
+}
+
+export interface AgUiActivity {
+  activityType: string
+  content: Record<string, unknown>
 }
 
 export interface Conversation {
@@ -140,5 +166,9 @@ export interface StreamEvent {
   provider?: ProviderId
   model?: string
   agent?: AgentSummary | null
+  messageId?: string
+  activityType?: string
+  content?: Record<string, unknown>
+  snapshot?: Record<string, unknown>
 }
 

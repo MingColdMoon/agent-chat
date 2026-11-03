@@ -49,6 +49,18 @@ BUILTIN_AGENTS = (
             "并给出补充字段建议。"
         ),
     },
+    {
+        "slug": "pc-builder",
+        "name": "装机大师",
+        "description": "按预算、用途和偏好可视化生成兼容的电脑装机方案。",
+        "category": "硬件配置",
+        "icon": "cpu",
+        "instructions": (
+            "你是装机大师。根据用户的预算、主要用途、性能偏好和外观偏好，"
+            "调用 generate_pc_build 工具生成配置。回答需说明每类硬件的选择理由、"
+            "预估总价、兼容性注意事项和后续升级路径。不得把预估价格描述为实时报价。"
+        ),
+    },
 )
 
 
@@ -333,6 +345,7 @@ class ConversationStore:
                         error=message.error,
                         provider=message.provider,
                         model=message.model,
+                        activity=message.activity,
                     )
                     for message in message_rows
                 ],
@@ -445,6 +458,7 @@ class ConversationStore:
                     error=message.error,
                     provider=message.provider,
                     model=message.model,
+                    activity=message.activity,
                     created_at=now,
                 )
             )

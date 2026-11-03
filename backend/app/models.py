@@ -24,6 +24,7 @@ class Message(BaseModel):
     error: str | None = None
     provider: str | None = None
     model: str | None = None
+    activity: dict[str, Any] | None = None
 
 
 class AgentSummary(BaseModel):

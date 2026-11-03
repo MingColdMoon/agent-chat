@@ -86,6 +86,7 @@ class AgentRunner:
             web_search_enabled=runtime.web_search_enabled,
             tavily_api_key=runtime.tavily_api_key,
             tavily_api_url=runtime.tavily_api_url,
+            agent_key=agent_key,
         )
         if runtime.provider != "demo":
             return await self._run_live(
@@ -199,7 +200,15 @@ class AgentRunner:
         tool_name: str | None = None
         tool_input: dict[str, Any] = {}
 
-        if (
+        if agent_key == "pc-builder":
+            budget_match = re.search(r"(\d{3,6})", prompt)
+            tool_name = "generate_pc_build"
+            tool_input = {
+                "budget": int(budget_match.group(1)) if budget_match else 8000,
+                "use_case": prompt,
+                "priorities": prompt,
+            }
+        elif (
             runtime.web_search_enabled
             and re.search(
                 r"(搜索|搜一下|查一下|查找|联网|最新|新闻|search|web)",
@@ -244,6 +253,8 @@ class AgentRunner:
                     answer = f"现在是 **{result}**。"
                 elif tool_name == "web_search":
                     answer = f"根据 Tavily 的联网结果：\n\n{result}"
+                elif tool_name == "generate_pc_build":
+                    answer = _format_pc_build_answer(result)
                 else:
                     answer = (
                         f"`{tool_input['expression']}` 的计算结果是 "
@@ -348,4 +359,32 @@ def _demo_agent_answer(
             "配置真实模型 API Key 后，会使用完整自定义指令进行推理和回答。"
         )
     return _demo_answer(prompt)
+
+
+def _format_pc_build_answer(plan: dict[str, Any]) -> str:
+    lines = [
+        f"## {plan['title']}",
+        "",
+        f"预估总价：**¥{plan['total_price']:,}** / 预算 ¥{plan['budget']:,}",
+        "",
+        "| 部件 | 型号 | 预估价格 |",
+        "| --- | --- | ---: |",
+    ]
+    for component in plan["components"]:
+        lines.append(
+            f"| {component['category']} | {component['name']} | "
+            f"¥{component['price']:,} |"
+        )
+    lines.extend(
+        [
+            "",
+            "### 兼容性提醒",
+            *[f"- {note}" for note in plan["compatibility_notes"]],
+            "",
+            f"**升级建议：** {plan['upgrade_path']}",
+            "",
+            f"> {plan['price_basis']}",
+        ]
+    )
+    return "\n".join(lines)
 

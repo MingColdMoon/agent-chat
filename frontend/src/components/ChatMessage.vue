@@ -13,6 +13,8 @@ import {
 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import type { Message, ToolTrace } from '../types'
+import type { PcBuildPlan } from '../types'
+import PcBuildCard from './PcBuildCard.vue'
 
 const props = defineProps<{
   message: Message
@@ -150,6 +152,11 @@ async function copyMessage() {
       <AlertCircle :size="15" />
       <span>{{ message.error }}</span>
     </div>
+
+    <PcBuildCard
+      v-if="message.activity?.activityType === 'pc-build-plan'"
+      :plan="message.activity.content as unknown as PcBuildPlan"
+    />
 
     <button
       v-if="message.role === 'assistant' && message.content"
