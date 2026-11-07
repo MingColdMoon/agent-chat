@@ -1,7 +1,8 @@
 # Agent Chat
 
 一个基于 FastAPI、LangChain 和 Vue 3 的多用户智能体对话应用，包含 JWT 登录、
-智能体广场、工具调用、联网搜索、SSE 流式回答以及 PostgreSQL/Redis 持久化。
+智能体广场、工具调用、联网搜索、MediaCrawler 数据采集工作台、SSE 流式回答
+以及 PostgreSQL/Redis 持久化。
 
 ![智能体广场](docs/images/marketplace.png)
 
@@ -9,8 +10,11 @@
 
 ### 智能体广场
 
-- 默认内置 **智能客服**、**智能自动化报表** 和 **装机大师**。
+- 默认内置 **智能客服**、**智能自动化报表**、**装机大师** 和
+  **MediaCrawler 采集助手**。
 - 装机大师使用 AG-UI 活动事件展示可交互装机配置与硬件清单。
+- MediaCrawler 采集助手支持小红书、抖音、快手、B站、微博、贴吧和知乎的
+  关键词搜索、内容详情、创作者主页、评论与媒体任务配置。
 - 用户可以创建自己的智能体，配置名称、分类、图标、简介和系统指令。
 - 自定义智能体只对创建者可见。
 - 可以开始一个新智能体会话，也可以把智能体应用到当前会话。
@@ -45,6 +49,9 @@
 - `get_current_time`：获取当前日期、时间和时区
 - `calculator`：通过 Python AST 安全计算数学表达式
 - `web_search`：通过 Tavily 搜索互联网
+- `start_media_crawler_task`：向独立 MediaCrawler WebUI API 提交采集任务
+- `get_media_crawler_status`：读取采集状态与最近日志
+- `list_media_crawler_files`：读取 JSON、CSV 或 Excel 导出文件
 
 ## 功能预览
 
@@ -61,6 +68,12 @@
 ![装机大师配置器](docs/images/pc-builder-empty.png)
 
 ![AG-UI 装机方案](docs/images/pc-builder-plan.png)
+
+### MediaCrawler 数据采集
+
+![MediaCrawler 采集工作台](docs/images/media-crawler-empty.png)
+
+![MediaCrawler 任务结果](docs/images/media-crawler-task.png)
 
 ### 用户登录
 
@@ -79,6 +92,7 @@
 | 交互协议 | AG-UI 兼容事件子集、SSE、共享状态与活动快照 |
 | 模型 | ChatOpenAI、OpenAI/DeepSeek/自定义兼容接口 |
 | 搜索 | Tavily API |
+| 数据采集 | MediaCrawler WebUI API、Playwright、可选 CDP |
 | 认证 | PyJWT、Argon2、Redis Token 吊销 |
 | 数据库 | PostgreSQL 16、SQLAlchemy Async、asyncpg |
 | 缓存 | Redis 7 |
@@ -96,6 +110,7 @@ flowchart LR
     API -->|JWT 吊销/登录限流| Redis[(Redis)]
     API -->|SSE| Browser
     API -->|ChatGPT/DeepSeek/Tavily| External[外部模型与搜索服务]
+    API -->|采集任务与导出文件| Crawler[MediaCrawler 独立服务]
 ```
 
 ## 快速启动
@@ -176,15 +191,38 @@ API Key 只保存在当前标签页的 `sessionStorage`，不会写入 PostgreSQ
 ## 智能体使用
 
 1. 登录后点击侧边栏“智能体广场”。
-2. 选择内置智能体“智能客服”“智能自动化报表”或“装机大师”。
+2. 选择内置智能体“智能客服”“智能自动化报表”“装机大师”或
+   “MediaCrawler 采集助手”。
 3. 点击“开始对话”创建新会话，或点击“应用到当前”切换当前会话角色。
 4. 点击“创建智能体”定义自己的角色和系统指令。
 5. 自定义智能体会出现在“我的智能体”区域，仅当前用户可见。
 
 真实模型模式下，智能体系统指令会注入 LangChain `SystemMessage`。演示模式下，
-内置智能体会返回对应的客服、报表或装机示例回答，便于无 API Key 验证完整流程。
+内置智能体会返回对应的客服、报表、装机或 MediaCrawler 任务预览，便于无 API Key
+验证完整流程。
 装机大师通过 AG-UI 的 `STATE_SNAPSHOT` 与 `ACTIVITY_SNAPSHOT` 渲染预算滑杆、
-用途选择器、硬件清单和兼容性提示。
+用途选择器、硬件清单和兼容性提示。MediaCrawler 通过同样的活动事件渲染任务状态、
+平台、采集数量、评论与导出配置。
+
+## MediaCrawler 接入
+
+应用不会复制或内嵌 MediaCrawler 源码，而是把它作为独立的本地/内网服务调用。
+在 MediaCrawler 仓库中启动 WebUI API：
+
+```bash
+uv run uvicorn api.main:app --host 127.0.0.1 --port 8080
+```
+
+然后在 Agent Chat 的 `.env` 或 Docker 环境中配置：
+
+```env
+MEDIACRAWLER_API_URL=http://127.0.0.1:8080
+MEDIACRAWLER_API_TOKEN=
+```
+
+未配置服务地址时，内置智能体仍会生成完整可执行任务参数，但会明确标记为
+“任务预览”，不会伪造采集结果。登录 Cookie 由 MediaCrawler 独立服务在其
+浏览器上下文中保存，不应发送到聊天消息中。
 
 ## 本地开发
 
@@ -290,6 +328,8 @@ agent-chat/
 
 - [智能体广场实现说明](docs/agent-marketplace.md)
 - [装机大师与 AG-UI 实现说明](docs/agui-pc-builder.md)
+- [MediaCrawler 内置智能体说明](docs/media-crawler-agent.md)
+- [LeiBox 风格界面说明](docs/leibox-ui.md)
 - [JWT 登录、PostgreSQL 与 Redis 实现说明](docs/auth-redis-postgresql.md)
 
 ## 生产化建议

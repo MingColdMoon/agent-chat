@@ -12,8 +12,14 @@ import {
   Wrench,
 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
-import type { Message, ToolTrace } from '../types'
-import type { PcBuildPlan } from '../types'
+import type {
+  MediaCrawlerTaskResult,
+  Message,
+  PcBuildPlan,
+  ToolTrace,
+} from '../types'
+import LeiBoxDotLoader from './LeiBoxDotLoader.vue'
+import MediaCrawlerTaskCard from './MediaCrawlerTaskCard.vue'
 import PcBuildCard from './PcBuildCard.vue'
 
 const props = defineProps<{
@@ -44,6 +50,9 @@ const toolLabels: Record<string, string> = {
   get_current_time: '查询当前时间',
   calculator: '数学计算',
   web_search: '联网搜索',
+  start_media_crawler_task: '启动采集任务',
+  get_media_crawler_status: '读取采集状态',
+  list_media_crawler_files: '读取导出文件',
 }
 
 function toolLabel(tool: ToolTrace): string {
@@ -140,12 +149,8 @@ async function copyMessage() {
       class="message-content markdown-body"
       v-html="renderedContent"
     ></div>
-    <div
-      v-else-if="message.streaming"
-      class="thinking-dots"
-      aria-label="正在生成回答"
-    >
-      <span></span><span></span><span></span>
+    <div v-else-if="message.streaming" class="message-loader">
+      <LeiBoxDotLoader label="Agent 正在组织回答" />
     </div>
 
     <div v-if="message.error" class="message-error">
@@ -156,6 +161,10 @@ async function copyMessage() {
     <PcBuildCard
       v-if="message.activity?.activityType === 'pc-build-plan'"
       :plan="message.activity.content as unknown as PcBuildPlan"
+    />
+    <MediaCrawlerTaskCard
+      v-if="message.activity?.activityType === 'media-crawler-task'"
+      :task="message.activity.content as unknown as MediaCrawlerTaskResult"
     />
 
     <button

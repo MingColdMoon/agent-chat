@@ -116,6 +116,72 @@ export interface AgUiActivity {
   content: Record<string, unknown>
 }
 
+export type MediaCrawlerPlatform =
+  | 'xhs'
+  | 'dy'
+  | 'ks'
+  | 'bili'
+  | 'wb'
+  | 'tieba'
+  | 'zhihu'
+
+export type MediaCrawlerTaskType = 'search' | 'detail' | 'creator'
+export type MediaCrawlerStatus =
+  | 'preview'
+  | 'accepted'
+  | 'busy'
+  | 'unavailable'
+  | 'error'
+  | 'ok'
+  | 'unknown'
+
+export interface MediaCrawlerTaskSummary {
+  query?: string
+  targets?: string[]
+  max_items?: number
+  max_comments?: number
+  comments?: boolean
+  sub_comments?: boolean
+  media?: boolean
+  save_option?: string
+}
+
+export interface MediaCrawlerTaskRequest {
+  platform?: string
+  login_type?: string
+  crawler_type?: string
+  keywords?: string
+  specified_ids?: string
+  creator_ids?: string
+  max_notes_count?: number
+  max_comments_count?: number | null
+  enable_comments?: boolean
+  enable_sub_comments?: boolean
+  enable_media?: boolean
+  save_option?: string
+}
+
+export interface MediaCrawlerTaskResult {
+  source: 'mediacrawler'
+  status: MediaCrawlerStatus
+  execution_ready?: boolean
+  platform?: MediaCrawlerPlatform
+  platform_label?: string
+  crawler_type?: MediaCrawlerTaskType
+  crawler_type_label?: string
+  request?: MediaCrawlerTaskRequest
+  summary?: MediaCrawlerTaskSummary
+  warnings?: string[]
+  message?: string
+  detail?: string
+  setup?: {
+    api_url_env?: string
+    token_env?: string
+    service_command?: string
+    upstream?: string
+  }
+}
+
 export interface Conversation {
   id: string
   title: string
@@ -142,6 +208,7 @@ export interface Health {
   providers: ProviderId[]
   server_credentials: ProviderId[]
   tavily_configured: boolean
+  media_crawler_configured: boolean
 }
 
 export interface SendMessageResponse {

@@ -21,6 +21,7 @@ import AgentMarketplace from './components/AgentMarketplace.vue'
 import AuthScreen from './components/AuthScreen.vue'
 import ChatMessage from './components/ChatMessage.vue'
 import ConversationSidebar from './components/ConversationSidebar.vue'
+import MediaCrawlerConfigurator from './components/MediaCrawlerConfigurator.vue'
 import PcBuilderConfigurator from './components/PcBuilderConfigurator.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import {
@@ -468,7 +469,13 @@ async function selectConversation(id: string) {
     stickToBottom.value = true
     pageError.value = ''
     sidebarOpen.value = false
-    scrollToBottom(true)
+    if (conversation.messages.length) {
+      scrollToBottom(true)
+    } else {
+      void nextTick(() => {
+        if (messageScroller.value) messageScroller.value.scrollTop = 0
+      })
+    }
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : '加载会话失败'
   }
@@ -945,6 +952,9 @@ onBeforeUnmount(() => {
             <Menu :size="19" />
           </button>
           <div class="topbar-title">
+            <span class="topbar-kicker">
+              {{ currentAgent ? 'AGENT SESSION' : 'WORKSPACE' }}
+            </span>
             <h1>{{ currentSummary?.title || currentTitle }}</h1>
             <span>{{ headerMeta }}</span>
           </div>
@@ -1018,11 +1028,18 @@ onBeforeUnmount(() => {
             {{
               currentAgent?.key === 'pc-builder'
                 ? '告诉我你的装机需求'
+                : currentAgent?.key === 'media-crawler'
+                  ? '配置一次公开数据采集'
                 : '今天想了解什么？'
             }}
           </h2>
           <PcBuilderConfigurator
             v-if="currentAgent?.key === 'pc-builder'"
+            :disabled="busy"
+            @submit="useSuggestion"
+          />
+          <MediaCrawlerConfigurator
+            v-else-if="currentAgent?.key === 'media-crawler'"
             :disabled="busy"
             @submit="useSuggestion"
           />
@@ -1080,6 +1097,9 @@ onBeforeUnmount(() => {
             aria-hidden="true"
           ></span>
           <span>{{ statusText }}</span>
+          <span class="composer-context">
+            {{ currentAgent?.name || 'Agent Chat' }} / {{ providerLabel }}
+          </span>
         </div>
         </footer>
       </template>

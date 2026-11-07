@@ -1,7 +1,7 @@
 import ast
 import math
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -281,6 +281,490 @@ def tavily_search_endpoint(api_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, ""))
 
 
+MediaCrawlerPlatform = Literal[
+    "xhs",
+    "dy",
+    "ks",
+    "bili",
+    "wb",
+    "tieba",
+    "zhihu",
+]
+MediaCrawlerTaskType = Literal["search", "detail", "creator"]
+
+MEDIA_CRAWLER_PLATFORM_LABELS = {
+    "xhs": "小红书",
+    "dy": "抖音",
+    "ks": "快手",
+    "bili": "B站",
+    "wb": "微博",
+    "tieba": "百度贴吧",
+    "zhihu": "知乎",
+}
+
+
+class MediaCrawlerTaskInput(BaseModel):
+    platform: MediaCrawlerPlatform = Field(
+        default="xhs",
+        description="目标平台：xhs、dy、ks、bili、wb、tieba 或 zhihu",
+    )
+    crawler_type: MediaCrawlerTaskType = Field(
+        default="search",
+        description="任务类型：search 关键词搜索、detail 指定内容、creator 指定创作者",
+    )
+    keywords: str = Field(
+        default="",
+        max_length=500,
+        description="搜索任务的关键词，多个关键词用中文或英文逗号分隔",
+    )
+    targets: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="详情或创作者任务的内容 ID、创作者 ID 或完整主页链接",
+    )
+    max_items: int = Field(
+        default=15,
+        ge=1,
+        le=100,
+        description="最多采集的内容数量",
+    )
+    max_comments: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+        description="每篇内容最多采集的一级评论数量",
+    )
+    include_comments: bool = Field(
+        default=True,
+        description="是否采集一级评论",
+    )
+    include_sub_comments: bool = Field(
+        default=False,
+        description="是否采集二级评论",
+    )
+    download_media: bool = Field(
+        default=False,
+        description="是否下载封面、图片或视频",
+    )
+    save_option: Literal["jsonl", "json", "csv", "excel", "sqlite"] = Field(
+        default="jsonl",
+        description="结果保存格式",
+    )
+    login_type: Literal["cookie", "qrcode", "phone"] = Field(
+        default="cookie",
+        description="MediaCrawler 服务端登录方式",
+    )
+    start_page: int = Field(
+        default=1,
+        ge=1,
+        le=100,
+        description="搜索任务起始页码",
+    )
+    headless: bool = Field(
+        default=True,
+        description="是否使用无头浏览器",
+    )
+
+
+class MediaCrawlerStatusInput(BaseModel):
+    include_logs: bool = Field(
+        default=True,
+        description="是否同时读取最近运行日志",
+    )
+
+
+class MediaCrawlerFilesInput(BaseModel):
+    platform: MediaCrawlerPlatform | None = Field(
+        default=None,
+        description="按平台过滤数据文件",
+    )
+    file_type: Literal["json", "csv", "xlsx", "xls"] | None = Field(
+        default=None,
+        description="按文件类型过滤",
+    )
+
+
+def media_crawler_endpoint(api_url: str, path: str) -> str:
+    """Append an API path while accepting a base URL with or without /api."""
+    parsed = urlsplit(api_url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("MediaCrawler API 地址必须是有效的 http 或 https 地址")
+    base_path = parsed.path.rstrip("/")
+    if base_path.endswith("/api"):
+        base_path = base_path[:-4]
+    normalized_path = f"/{path.strip('/')}"
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"{base_path}/api{normalized_path}",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _media_crawler_headers(api_token: str | None) -> dict[str, str]:
+    token = (api_token or "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _media_crawler_request(payload: MediaCrawlerTaskInput) -> dict[str, Any]:
+    keywords = payload.keywords.strip()
+    targets = [item.strip() for item in payload.targets if item.strip()]
+    if payload.crawler_type == "search" and not keywords:
+        raise ValueError("关键词搜索任务必须填写 keywords")
+    if payload.crawler_type != "search" and not targets:
+        raise ValueError("详情或创作者任务必须至少填写一个 targets")
+
+    specified_ids = ",".join(targets)
+    return {
+        "platform": payload.platform,
+        "login_type": payload.login_type,
+        "crawler_type": payload.crawler_type,
+        "keywords": keywords if payload.crawler_type == "search" else "",
+        "specified_ids": (
+            specified_ids if payload.crawler_type == "detail" else ""
+        ),
+        "creator_ids": (
+            specified_ids if payload.crawler_type == "creator" else ""
+        ),
+        "start_page": payload.start_page,
+        "enable_comments": payload.include_comments,
+        "enable_sub_comments": payload.include_sub_comments,
+        "enable_media": payload.download_media,
+        "save_option": payload.save_option,
+        "headless": payload.headless,
+        "max_notes_count": payload.max_items,
+        "max_comments_count": (
+            payload.max_comments if payload.include_comments else None
+        ),
+    }
+
+
+def _media_crawler_preview(
+    payload: MediaCrawlerTaskInput,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    mode_labels = {
+        "search": "关键词搜索",
+        "detail": "指定内容详情",
+        "creator": "创作者主页",
+    }
+    warnings = [
+        "仅采集公开信息，并遵守目标平台服务条款、robots.txt 与适用法律。",
+        "请控制采集数量和频率，不要用于大规模抓取、绕过访问控制或商业转售。",
+        "登录 Cookie 应由 MediaCrawler 独立服务在本机安全保存，不要发送到聊天中。",
+    ]
+    if payload.include_sub_comments:
+        warnings.append("二级评论会增加请求数量和运行时间。")
+    if payload.download_media:
+        warnings.append("媒体下载需要 ffmpeg，部分直链可能受平台防盗链限制。")
+    targets = [item.strip() for item in payload.targets if item.strip()]
+    return {
+        "source": "mediacrawler",
+        "status": "preview",
+        "execution_ready": False,
+        "platform": payload.platform,
+        "platform_label": MEDIA_CRAWLER_PLATFORM_LABELS[payload.platform],
+        "crawler_type": payload.crawler_type,
+        "crawler_type_label": mode_labels[payload.crawler_type],
+        "request": request,
+        "summary": {
+            "query": payload.keywords.strip(),
+            "targets": targets,
+            "max_items": payload.max_items,
+            "max_comments": payload.max_comments,
+            "comments": payload.include_comments,
+            "sub_comments": payload.include_sub_comments,
+            "media": payload.download_media,
+            "save_option": payload.save_option,
+        },
+        "warnings": warnings,
+        "message": (
+            "尚未连接 MediaCrawler 服务，已生成可执行任务参数。"
+            "配置 MEDIACRAWLER_API_URL 后可启动真实采集。"
+        ),
+        "setup": {
+            "api_url_env": "MEDIACRAWLER_API_URL",
+            "token_env": "MEDIACRAWLER_API_TOKEN",
+            "service_command": (
+                "uv run uvicorn api.main:app --host 127.0.0.1 --port 8080"
+            ),
+            "upstream": "https://github.com/NanmiCoder/MediaCrawler",
+        },
+    }
+
+
+def create_media_crawler_tools(
+    api_url: str | None,
+    api_token: str | None = None,
+) -> list[StructuredTool]:
+    base_url = (api_url or "").strip()
+    headers = _media_crawler_headers(api_token)
+
+    async def _request_json(
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        timeout: int = 15,
+    ) -> dict[str, Any]:
+        if not base_url:
+            raise RuntimeError("MediaCrawler 服务尚未配置")
+        endpoint = media_crawler_endpoint(base_url, path)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.request(
+                method,
+                endpoint,
+                json=payload,
+                params=params,
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {"data": data}
+
+    async def _start_media_crawler_task(
+        platform: MediaCrawlerPlatform,
+        crawler_type: MediaCrawlerTaskType,
+        keywords: str,
+        targets: list[str],
+        max_items: int,
+        max_comments: int,
+        include_comments: bool,
+        include_sub_comments: bool,
+        download_media: bool,
+        save_option: Literal["jsonl", "json", "csv", "excel", "sqlite"],
+        login_type: Literal["cookie", "qrcode", "phone"],
+        start_page: int,
+        headless: bool,
+    ) -> dict[str, Any]:
+        payload = MediaCrawlerTaskInput(
+            platform=platform,
+            crawler_type=crawler_type,
+            keywords=keywords,
+            targets=targets,
+            max_items=max_items,
+            max_comments=max_comments,
+            include_comments=include_comments,
+            include_sub_comments=include_sub_comments,
+            download_media=download_media,
+            save_option=save_option,
+            login_type=login_type,
+            start_page=start_page,
+            headless=headless,
+        )
+        request = _media_crawler_request(payload)
+        if not base_url:
+            return _media_crawler_preview(payload, request)
+
+        try:
+            health = await _request_json("GET", "health", timeout=4)
+            started = await _request_json(
+                "POST",
+                "crawler/start",
+                payload=request,
+                timeout=20,
+            )
+        except httpx.HTTPStatusError as error:
+            detail = error.response.text.strip()[:500]
+            if error.response.status_code == 400:
+                return {
+                    "source": "mediacrawler",
+                    "status": "busy",
+                    "execution_ready": True,
+                    "platform": payload.platform,
+                    "platform_label": MEDIA_CRAWLER_PLATFORM_LABELS[
+                        payload.platform
+                    ],
+                    "crawler_type": payload.crawler_type,
+                    "request": request,
+                    "message": (
+                        "MediaCrawler 已有任务在运行，请先读取状态或等待任务结束。"
+                    ),
+                    "detail": detail,
+                }
+            return {
+                "source": "mediacrawler",
+                "status": "error",
+                "execution_ready": True,
+                "platform": payload.platform,
+                "platform_label": MEDIA_CRAWLER_PLATFORM_LABELS[
+                    payload.platform
+                ],
+                "crawler_type": payload.crawler_type,
+                "request": request,
+                "message": (
+                    f"MediaCrawler 返回 HTTP {error.response.status_code}，"
+                    "任务未启动。"
+                ),
+                "detail": detail,
+            }
+        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            return {
+                "source": "mediacrawler",
+                "status": "unavailable",
+                "execution_ready": False,
+                "platform": payload.platform,
+                "platform_label": MEDIA_CRAWLER_PLATFORM_LABELS[payload.platform],
+                "crawler_type": payload.crawler_type,
+                "request": request,
+                "message": f"无法连接 MediaCrawler 服务：{error}",
+            }
+
+        return {
+            "source": "mediacrawler",
+            "status": "accepted",
+            "execution_ready": True,
+            "platform": payload.platform,
+            "platform_label": MEDIA_CRAWLER_PLATFORM_LABELS[payload.platform],
+            "crawler_type": payload.crawler_type,
+            "crawler_type_label": {
+                "search": "关键词搜索",
+                "detail": "指定内容详情",
+                "creator": "创作者主页",
+            }[payload.crawler_type],
+            "request": request,
+            "service": {
+                "health": health.get("status", "ok"),
+                "start": started.get("status", "ok"),
+            },
+            "summary": {
+                "query": keywords.strip(),
+                "targets": targets,
+                "max_items": max_items,
+                "max_comments": max_comments,
+                "comments": include_comments,
+                "sub_comments": include_sub_comments,
+                "media": download_media,
+                "save_option": save_option,
+            },
+            "warnings": [
+                "任务在 MediaCrawler 独立服务中异步运行。",
+                "请使用状态工具查看进度，并使用文件工具定位导出结果。",
+                "合规使用公开数据，禁止大规模采集和绕过平台访问控制。",
+            ],
+            "message": "MediaCrawler 任务已提交，当前在独立服务中异步运行。",
+        }
+
+    async def _get_media_crawler_status(
+        include_logs: bool,
+    ) -> dict[str, Any]:
+        if not base_url:
+            return {
+                "source": "mediacrawler",
+                "status": "unavailable",
+                "message": (
+                    "尚未连接 MediaCrawler 服务。请配置 "
+                    "MEDIACRAWLER_API_URL 后重试。"
+                ),
+            }
+        try:
+            status = await _request_json("GET", "crawler/status", timeout=8)
+            logs: list[dict[str, Any]] = []
+            if include_logs:
+                log_data = await _request_json(
+                    "GET",
+                    "crawler/logs",
+                    params={"limit": 30},
+                    timeout=8,
+                )
+                raw_logs = log_data.get("logs", [])
+                if isinstance(raw_logs, list):
+                    logs = raw_logs[-30:]
+        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            return {
+                "source": "mediacrawler",
+                "status": "unavailable",
+                "message": f"无法读取 MediaCrawler 状态：{error}",
+            }
+        return {
+            "source": "mediacrawler",
+            "status": status.get("status", "unknown"),
+            "platform": status.get("platform"),
+            "crawler_type": status.get("crawler_type"),
+            "started_at": status.get("started_at"),
+            "error_message": status.get("error_message"),
+            "logs": logs,
+            "message": "已读取 MediaCrawler 最新运行状态。",
+        }
+
+    async def _list_media_crawler_files(
+        platform: MediaCrawlerPlatform | None,
+        file_type: Literal["json", "csv", "xlsx", "xls"] | None,
+    ) -> dict[str, Any]:
+        if not base_url:
+            return {
+                "source": "mediacrawler",
+                "status": "unavailable",
+                "files": [],
+                "message": "尚未连接 MediaCrawler 服务，无法读取导出文件。",
+            }
+        params = {
+            key: value
+            for key, value in {
+                "platform": platform,
+                "file_type": file_type,
+            }.items()
+            if value
+        }
+        try:
+            data = await _request_json(
+                "GET",
+                "data/files",
+                params=params,
+                timeout=12,
+            )
+        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            return {
+                "source": "mediacrawler",
+                "status": "unavailable",
+                "files": [],
+                "message": f"无法读取 MediaCrawler 数据文件：{error}",
+            }
+        files = data.get("files", [])
+        return {
+            "source": "mediacrawler",
+            "status": "ok",
+            "files": files[:50] if isinstance(files, list) else [],
+            "message": "已读取 MediaCrawler 导出文件列表。",
+        }
+
+    return [
+        StructuredTool.from_function(
+            coroutine=_start_media_crawler_task,
+            name="start_media_crawler_task",
+            description=(
+                "在 MediaCrawler 独立服务中启动公开社交媒体数据采集任务。"
+                "支持小红书、抖音、快手、B站、微博、贴吧和知乎，"
+                "可选择关键词搜索、指定内容详情或创作者主页。"
+                "仅在用户明确要求采集数据时调用。"
+            ),
+            args_schema=MediaCrawlerTaskInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=_get_media_crawler_status,
+            name="get_media_crawler_status",
+            description=(
+                "读取 MediaCrawler 当前任务状态和最近日志，"
+                "用于检查运行进度或排查失败。"
+            ),
+            args_schema=MediaCrawlerStatusInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=_list_media_crawler_files,
+            name="list_media_crawler_files",
+            description=(
+                "列出 MediaCrawler 已导出的 JSON、CSV 或 Excel 数据文件，"
+                "可按平台和文件类型过滤。"
+            ),
+            args_schema=MediaCrawlerFilesInput,
+        ),
+    ]
+
+
 def create_tavily_tool(api_key: str, api_url: str) -> StructuredTool:
     endpoint = tavily_search_endpoint(api_url)
 
@@ -345,10 +829,19 @@ def tools_for_runtime(
     tavily_api_key: str | None,
     tavily_api_url: str | None,
     agent_key: str | None = None,
+    media_crawler_api_url: str | None = None,
+    media_crawler_api_token: str | None = None,
 ) -> list[Any]:
     tools: list[Any] = [*TOOLS]
     if agent_key == "pc-builder":
         tools.append(generate_pc_build)
+    if agent_key == "media-crawler":
+        tools.extend(
+            create_media_crawler_tools(
+                media_crawler_api_url,
+                media_crawler_api_token,
+            )
+        )
     if web_search_enabled and tavily_api_key:
         tools.append(
             create_tavily_tool(

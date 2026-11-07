@@ -8,7 +8,8 @@
 
 实现以下闭环：
 
-1. 默认内置“智能客服”“智能自动化报表”和“装机大师”。
+1. 默认内置“智能客服”“智能自动化报表”“装机大师”和
+   “MediaCrawler 采集助手”。
 2. 用户可以查看并使用所有内置智能体。
 3. 用户可以创建自己的智能体。
 4. 自定义智能体只对创建者可见。
@@ -78,6 +79,7 @@ REFERENCES agents(id) ON DELETE SET NULL;
 | 智能客服 | `customer-service` | 客户服务 | headset |
 | 智能自动化报表 | `automated-reports` | 数据分析 | chart |
 | 装机大师 | `pc-builder` | 硬件配置 | cpu |
+| MediaCrawler 采集助手 | `media-crawler` | 社交媒体 | radar |
 
 种子代码位于 `backend/app/storage.py`：
 
@@ -97,6 +99,11 @@ BUILTIN_AGENTS = (
         "slug": "pc-builder",
         "name": "装机大师",
         "instructions": "你是装机大师，根据预算和用途生成装机方案...",
+    },
+    {
+        "slug": "media-crawler",
+        "name": "MediaCrawler 采集助手",
+        "instructions": "你是 MediaCrawler 社交媒体数据采集助手...",
     },
 )
 ```
@@ -162,6 +169,7 @@ messages = [
 - 智能客服会引导用户提供订单号、问题类型等信息。
 - 智能自动化报表会生成包含摘要、指标、异常和建议的 Markdown 报表模板。
 - 装机大师会生成 AG-UI 可视化装机配置器与硬件活动卡片。
+- MediaCrawler 采集助手会生成结构化采集任务预览或真实任务活动卡片。
 - 自定义智能体会显示当前角色名称。
 
 ## 7. Vue 页面
@@ -173,6 +181,8 @@ messages = [
 - 侧边栏入口“智能体广场”。
 - 内置智能体区域。
 - 我的智能体区域。
+- 按名称、简介和分类搜索。
+- “全部 / 内置 / 我的”筛选。
 - 开始新会话。
 - 应用到当前会话。
 - 删除自定义智能体。
@@ -197,7 +207,7 @@ messages = [
 
 ```json
 {
-  "Builtins": "智能客服,智能自动化报表,装机大师",
+  "Builtins": "智能客服,智能自动化报表,装机大师,MediaCrawler 采集助手",
   "Custom": "产品文案助手",
   "ConversationAgent": "智能客服",
   "CustomerReply": true,
@@ -208,7 +218,7 @@ messages = [
 
 这验证了：
 
-1. 三个内置智能体默认存在。
+1. 四个内置智能体默认存在。
 2. 用户可以创建自定义智能体。
 3. 新会话可以绑定智能客服。
 4. 智能客服演示回答进入 SSE。

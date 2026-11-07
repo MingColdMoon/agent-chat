@@ -147,7 +147,14 @@ def create_app(
 
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
-        tools = ["get_current_time", "calculator", "generate_pc_build"]
+        tools = [
+            "get_current_time",
+            "calculator",
+            "generate_pc_build",
+            "start_media_crawler_task",
+            "get_media_crawler_status",
+            "list_media_crawler_files",
+        ]
         if settings.tavily_api_key:
             tools.append("web_search")
         server_credentials = []
@@ -163,6 +170,7 @@ def create_app(
             providers=["demo", "openai", "deepseek", "custom"],
             server_credentials=server_credentials,
             tavily_configured=bool(settings.tavily_api_key),
+            media_crawler_configured=settings.media_crawler_configured,
         )
 
     @app.post(
@@ -565,6 +573,34 @@ async def _execute_run(
                 messageId=assistant_id,
                 activityType="pc-build-plan",
                 content=pc_build_trace.output,
+                replace=True,
+            )
+        media_crawler_trace = next(
+            (
+                trace
+                for trace in reversed(tools)
+                if trace.name == "start_media_crawler_task"
+                and isinstance(trace.output, dict)
+                and trace.output.get("source") == "mediacrawler"
+            ),
+            None,
+        )
+        if media_crawler_trace:
+            agui_activity = {
+                "activityType": "media-crawler-task",
+                "content": media_crawler_trace.output,
+            }
+            await runs.publish(
+                run,
+                "STATE_SNAPSHOT",
+                snapshot={"mediaCrawler": media_crawler_trace.output},
+            )
+            await runs.publish(
+                run,
+                "ACTIVITY_SNAPSHOT",
+                messageId=assistant_id,
+                activityType="media-crawler-task",
+                content=media_crawler_trace.output,
                 replace=True,
             )
         assistant_message = Message(

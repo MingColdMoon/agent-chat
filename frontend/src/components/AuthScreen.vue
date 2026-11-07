@@ -2,12 +2,14 @@
 import { computed, ref } from 'vue'
 import {
   AlertCircle,
+  ArrowUpRight,
   ArrowRight,
   Eye,
   EyeOff,
   LoaderCircle,
   LockKeyhole,
   ShieldCheck,
+  Sparkles,
   UserRound,
 } from 'lucide-vue-next'
 import type { AuthMode, AuthSubmission } from '../types'
@@ -68,14 +70,32 @@ function submit() {
 <template>
   <main class="auth-screen">
     <section class="auth-intro">
-      <div class="auth-brand">
-        <span class="brand-mark" aria-hidden="true">
-          <ShieldCheck :size="20" :stroke-width="1.8" />
-        </span>
-        <div>
-          <strong>Agent Chat</strong>
-          <span>LangChain + Vue</span>
+      <div class="auth-intro-top">
+        <div class="auth-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <Sparkles :size="20" :stroke-width="1.8" />
+          </span>
+          <div>
+            <strong>Agent Chat</strong>
+            <span>LangChain + Vue</span>
+          </div>
         </div>
+        <span class="auth-index">AGENT / 01</span>
+      </div>
+      <div class="auth-hero">
+        <span>PRIVATE AGENT WORKSPACE</span>
+        <h1>
+          让想法交给<br />
+          <span>真正会工作的</span><br />
+          <span>智能体。</span>
+        </h1>
+        <p>
+          对话、检索、数据采集与工具调用，在同一个安静、专注的工作空间完成。
+        </p>
+        <span class="auth-hero-link">
+          Agent Marketplace
+          <ArrowUpRight :size="17" />
+        </span>
       </div>
       <div class="auth-signal" aria-hidden="true">
         <span></span>

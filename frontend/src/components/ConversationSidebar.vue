@@ -64,6 +64,8 @@ function relativeTime(value: string): string {
       </button>
     </div>
 
+    <div class="sidebar-section-label">工作区</div>
+
     <button class="new-chat" type="button" @click="emit('newChat')">
       <Plus :size="17" />
       <span>新会话</span>

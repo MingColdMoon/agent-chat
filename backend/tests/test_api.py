@@ -252,6 +252,7 @@ def test_builtin_agents_are_seeded_for_every_user(tmp_path: Path) -> None:
         "智能客服",
         "智能自动化报表",
         "装机大师",
+        "MediaCrawler 采集助手",
     ]
     assert all(agent["is_builtin"] for agent in agents)
 
@@ -443,4 +444,55 @@ def test_pc_builder_emits_agui_activity_and_persists_plan(
     assert assistant["activity"]["activityType"] == "pc-build-plan"
     assert assistant["activity"]["content"]["use_case"] == "游戏娱乐"
     assert len(assistant["activity"]["content"]["components"]) == 8
+
+
+def test_media_crawler_emits_task_preview_activity(tmp_path: Path) -> None:
+    with build_app(tmp_path) as client:
+        auth = register(client)
+        headers = auth_headers(auth["access_token"])
+        agents = client.get("/api/agents", headers=headers).json()["agents"]
+        media_crawler = next(
+            agent for agent in agents if agent["key"] == "media-crawler"
+        )
+        conversation = client.post(
+            "/api/conversations",
+            headers=headers,
+            json={"agent_id": media_crawler["id"]},
+        ).json()["conversation"]
+        sent = client.post(
+            f"/api/conversations/{conversation['id']}/messages",
+            headers=headers,
+            json={
+                "content": (
+                    "请执行 MediaCrawler 公开数据采集任务。\n"
+                    "平台：小红书（xhs）\n"
+                    "任务：关键词（search）\n"
+                    "关键词：AI 效率工具\n"
+                    "内容上限：12\n"
+                    "单篇评论上限：8\n"
+                    "一级评论：开启\n"
+                    "二级评论：关闭\n"
+                    "下载媒体：关闭\n"
+                    "导出格式：jsonl"
+                ),
+                "runtime": {"provider": "demo"},
+            },
+        )
+        stream_body = read_stream(
+            client,
+            sent.json()["stream_url"],
+            auth["access_token"],
+        )
+        stored = client.get(
+            f"/api/conversations/{conversation['id']}",
+            headers=headers,
+        ).json()["conversation"]
+
+    assert '"type": "ACTIVITY_SNAPSHOT"' in stream_body
+    assert "MediaCrawler 任务预览" in stream_body
+    assistant = stored["messages"][-1]
+    assert assistant["activity"]["activityType"] == "media-crawler-task"
+    assert assistant["activity"]["content"]["platform"] == "xhs"
+    assert assistant["activity"]["content"]["status"] == "preview"
+    assert assistant["activity"]["content"]["summary"]["max_items"] == 12
 

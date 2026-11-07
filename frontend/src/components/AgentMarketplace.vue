@@ -12,6 +12,8 @@ import {
   Headset,
   LoaderCircle,
   Plus,
+  Radar,
+  Search,
   Sparkles,
   Trash2,
   X,
@@ -49,6 +51,8 @@ const form = reactive<AgentCreatePayload>({
   instructions: '',
 })
 const formError = ref('')
+const searchQuery = ref('')
+const activeFilter = ref<'all' | 'builtin' | 'custom'>('all')
 
 const iconMap = {
   bot: Bot,
@@ -58,6 +62,7 @@ const iconMap = {
   document: FileText,
   business: BriefcaseBusiness,
   cpu: Cpu,
+  radar: Radar,
 }
 
 const iconOptions = [
@@ -69,8 +74,47 @@ const iconOptions = [
   { value: 'business', label: '业务' },
 ]
 
+const marketplaceFilters = [
+  { id: 'all', label: '全部' },
+  { id: 'builtin', label: '内置' },
+  { id: 'custom', label: '我的' },
+] as const
+
+const builtinAgents = computed(() =>
+  props.agents.filter((agent) => agent.is_builtin),
+)
+
 const customAgents = computed(() =>
   props.agents.filter((agent) => !agent.is_builtin),
+)
+
+const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
+
+function matchesSearch(agent: AgentSummary) {
+  if (!normalizedQuery.value) return true
+  const searchable = [
+    agent.name,
+    agent.description,
+    agent.category,
+    agent.key || '',
+  ]
+    .join(' ')
+    .toLowerCase()
+  return searchable.includes(normalizedQuery.value)
+}
+
+const visibleBuiltinAgents = computed(() => {
+  if (activeFilter.value === 'custom') return []
+  return builtinAgents.value.filter(matchesSearch)
+})
+
+const visibleCustomAgents = computed(() => {
+  if (activeFilter.value === 'builtin') return []
+  return customAgents.value.filter(matchesSearch)
+})
+
+const visibleAgentCount = computed(
+  () => visibleBuiltinAgents.value.length + visibleCustomAgents.value.length,
 )
 
 function agentIcon(agent: AgentSummary) {
@@ -130,9 +174,9 @@ watch(
         <ArrowLeft :size="18" />
       </button>
       <div class="marketplace-heading">
-        <span class="marketplace-kicker">AGENT MARKET</span>
-        <h1>智能体广场</h1>
-        <p>选择一个角色开始对话，或创建属于自己的专用智能体。</p>
+        <span class="marketplace-kicker">LEIBOX / AGENT INDEX</span>
+        <h1>智能体，按用途挑选</h1>
+        <p>从预置角色开始，或创建只属于你的工作方式。</p>
       </div>
       <button
         class="create-agent-button"
@@ -144,6 +188,29 @@ watch(
       </button>
     </header>
 
+    <div class="marketplace-toolbar">
+      <label class="marketplace-search">
+        <Search :size="17" />
+        <input
+          v-model="searchQuery"
+          type="search"
+          placeholder="搜索智能体、用途或分类"
+        />
+        <span>{{ visibleAgentCount }}</span>
+      </label>
+      <div class="marketplace-filters" role="group" aria-label="智能体筛选">
+        <button
+          v-for="filter in marketplaceFilters"
+          :key="filter.id"
+          type="button"
+          :class="{ active: activeFilter === filter.id }"
+          @click="activeFilter = filter.id"
+        >
+          {{ filter.label }}
+        </button>
+      </div>
+    </div>
+
     <div v-if="error" class="marketplace-error">{{ error }}</div>
 
     <div v-if="loading" class="marketplace-loading">
@@ -152,17 +219,20 @@ watch(
     </div>
 
     <template v-else>
-      <div class="marketplace-section-heading">
+      <div
+        v-if="activeFilter !== 'custom'"
+        class="marketplace-section-heading"
+      >
         <div>
           <span>系统预置</span>
           <h2>即开即用</h2>
         </div>
-        <span>{{ agents.filter((agent) => agent.is_builtin).length }} 个内置角色</span>
+        <span>{{ visibleBuiltinAgents.length }} 个内置角色</span>
       </div>
 
-      <div class="agent-grid">
+      <div v-if="visibleBuiltinAgents.length" class="agent-grid">
         <article
-          v-for="agent in agents.filter((item) => item.is_builtin)"
+          v-for="(agent, index) in visibleBuiltinAgents"
           :key="agent.id"
           class="agent-card"
           :class="{ selected: agent.id === currentAgentId }"
@@ -172,6 +242,9 @@ watch(
               <component :is="agentIcon(agent)" :size="22" />
             </span>
             <span class="agent-badge">内置</span>
+            <span class="agent-card-index">
+              {{ String(index + 1).padStart(2, '0') }}
+            </span>
           </div>
           <div class="agent-card-copy">
             <span class="agent-category">{{ agent.category }}</span>
@@ -200,17 +273,20 @@ watch(
         </article>
       </div>
 
-      <div class="marketplace-section-heading custom-heading">
+      <div
+        v-if="activeFilter !== 'builtin'"
+        class="marketplace-section-heading custom-heading"
+      >
         <div>
           <span>个人空间</span>
           <h2>我的智能体</h2>
         </div>
-        <span>{{ customAgents.length }} 个自定义角色</span>
+        <span>{{ visibleCustomAgents.length }} 个自定义角色</span>
       </div>
 
-      <div v-if="customAgents.length" class="agent-grid">
+      <div v-if="visibleCustomAgents.length" class="agent-grid">
         <article
-          v-for="agent in customAgents"
+          v-for="(agent, index) in visibleCustomAgents"
           :key="agent.id"
           class="agent-card custom"
           :class="{ selected: agent.id === currentAgentId }"
@@ -228,6 +304,9 @@ watch(
             >
               <Trash2 :size="15" />
             </button>
+            <span class="agent-card-index">
+              {{ String(index + 1).padStart(2, '0') }}
+            </span>
           </div>
           <div class="agent-card-copy">
             <span class="agent-category">{{ agent.category }}</span>
@@ -257,7 +336,7 @@ watch(
       </div>
 
       <button
-        v-else
+        v-else-if="activeFilter !== 'builtin' && !normalizedQuery"
         class="empty-custom-agent"
         type="button"
         @click="emit('openCreate')"
@@ -271,6 +350,15 @@ watch(
         </span>
         <ArrowRight :size="17" />
       </button>
+
+      <div
+        v-if="!loading && visibleAgentCount === 0"
+        class="marketplace-empty"
+      >
+        <Search :size="22" />
+        <strong>没有匹配的智能体</strong>
+        <span>换一个关键词，或切换到“全部”。</span>
+      </div>
     </template>
   </section>
 

@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     tavily_api_key: str | None = None
     tavily_api_url: str = DEFAULT_TAVILY_API_URL
+    media_crawler_api_url: str | None = None
+    media_crawler_api_token: str | None = None
     database_url: str = (
         "postgresql+asyncpg://agent:agent@127.0.0.1:5433/agent_chat"
     )
@@ -108,6 +110,13 @@ class Settings(BaseSettings):
         if self.deepseek_api_key and self.deepseek_api_key.strip():
             return DEEPSEEK_MODEL
         return "demo"
+
+    @property
+    def media_crawler_configured(self) -> bool:
+        return bool(
+            self.media_crawler_api_url
+            and self.media_crawler_api_url.strip()
+        )
 
 
 @lru_cache

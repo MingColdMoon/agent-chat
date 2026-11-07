@@ -12,6 +12,8 @@ const port = Number(process.env.CDP_PORT || 9445)
 const appUrl = process.env.APP_URL || 'http://127.0.0.1:18080'
 const username = process.env.DOC_USERNAME || 'demo_alice'
 const password = process.env.DOC_PASSWORD || 'AgentChat123!'
+const profileDir =
+  process.env.DOC_PROFILE || join(rootDir, '.edge-docs-profile')
 
 await mkdir(outputDir, { recursive: true })
 
@@ -22,7 +24,7 @@ const edge = spawn(
     '--no-sandbox',
     '--disable-gpu',
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${join(rootDir, '.edge-docs-profile')}`,
+    `--user-data-dir=${profileDir}`,
     'about:blank',
   ],
   { stdio: 'ignore' },
@@ -96,7 +98,10 @@ async function evaluate(expression) {
     returnByValue: true,
   })
   if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text)
+    throw new Error(
+      result.exceptionDetails.exception?.description ||
+        result.exceptionDetails.text,
+    )
   }
   return result.result.value
 }
@@ -212,6 +217,12 @@ if (!(await evaluate("document.querySelectorAll('.message').length > 0"))) {
       document.querySelector('.composer').requestSubmit();
     })()
   `)
+  try {
+    await waitFor("document.querySelector('.leibox-dot-loader')", 2_500)
+    await capture('agent-loading.png')
+  } catch {
+    // The demo can finish before a screenshot is useful.
+  }
   await waitFor(
     "document.querySelector('.message.assistant .message-content')",
     20_000,
@@ -228,6 +239,31 @@ await evaluate("document.querySelector('.marketplace-link').click()")
 await waitFor("document.querySelector('.marketplace')")
 await new Promise((resolve) => setTimeout(resolve, 300))
 await capture('marketplace.png')
+
+await evaluate(`
+  (() => {
+    const input = document.querySelector('.marketplace-search input');
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    ).set;
+    setter.call(input, 'MediaCrawler');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()
+`)
+await waitFor("document.querySelectorAll('.agent-card').length === 1")
+await evaluate(`
+  (() => {
+    const input = document.querySelector('.marketplace-search input');
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    ).set;
+    setter.call(input, '');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()
+`)
+await waitFor("document.querySelectorAll('.agent-card').length > 1")
 
 await evaluate("document.querySelector('.create-agent-button').click()")
 await waitFor("document.querySelector('.agent-create-panel')")
@@ -277,6 +313,75 @@ await evaluate(`
 `)
 await new Promise((resolve) => setTimeout(resolve, 150))
 await capture('pc-builder-plan.png')
+
+await evaluate("document.querySelector('.marketplace-link').click()")
+await waitFor("document.querySelector('.marketplace')")
+await waitFor(
+  "[...document.querySelectorAll('.agent-card h3')].some((item) => item.textContent.includes('MediaCrawler'))",
+)
+await evaluate(`
+  (() => {
+    const card = [...document.querySelectorAll('.agent-card')].find(
+      (item) =>
+        item.querySelector('h3')?.textContent.includes('MediaCrawler')
+    );
+    if (!card) throw new Error('MediaCrawler agent card not found');
+    card.querySelector('.agent-primary-action').click();
+  })()
+`)
+await waitFor("document.querySelector('.crawler-configurator')")
+await new Promise((resolve) => setTimeout(resolve, 300))
+await capture('media-crawler-empty.png')
+
+await evaluate(`
+  (() => {
+    const input = document.querySelector('.crawler-field input[type="text"]');
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    ).set;
+    setter.call(input, 'AI 效率工具');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()
+`)
+await new Promise((resolve) => setTimeout(resolve, 100))
+await evaluate("document.querySelector('.crawler-submit').click()")
+await waitFor("document.querySelector('.crawler-task-card')", 25_000)
+await new Promise((resolve) => setTimeout(resolve, 300))
+await evaluate(`
+  (() => {
+    const scroller = document.querySelector('.message-scroller');
+    const card = document.querySelector('.crawler-task-card');
+    scroller.scrollTop +=
+      card.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      88;
+  })()
+`)
+await new Promise((resolve) => setTimeout(resolve, 150))
+await capture('media-crawler-task.png')
+
+await setViewport(390, 844)
+await navigate()
+await waitFor("document.querySelector('.app-shell')")
+await evaluate("document.querySelector('.mobile-menu').click()")
+await waitFor("document.querySelector('.sidebar.open')")
+await evaluate("document.querySelector('.marketplace-link').click()")
+await waitFor("document.querySelector('.marketplace')")
+await waitFor(
+  "[...document.querySelectorAll('.agent-card h3')].some((item) => item.textContent.includes('MediaCrawler'))",
+)
+await evaluate(`
+  (() => {
+    const card = [...document.querySelectorAll('.agent-card')].find(
+      (item) => item.querySelector('h3')?.textContent.includes('MediaCrawler')
+    );
+    card.querySelector('.agent-primary-action').click();
+  })()
+`)
+await waitFor("document.querySelector('.crawler-configurator')")
+await new Promise((resolve) => setTimeout(resolve, 300))
+await capture('media-crawler-mobile.png')
 
 await send('Emulation.clearDeviceMetricsOverride')
 console.log(`Documentation screenshots written to ${outputDir}`)

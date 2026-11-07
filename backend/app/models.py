@@ -125,6 +125,7 @@ class HealthResponse(BaseModel):
     providers: list[ProviderId]
     server_credentials: list[ProviderId]
     tavily_configured: bool
+    media_crawler_configured: bool = False
 
 
 class AuthCredentials(BaseModel):

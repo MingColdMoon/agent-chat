@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -87,6 +88,8 @@ class AgentRunner:
             tavily_api_key=runtime.tavily_api_key,
             tavily_api_url=runtime.tavily_api_url,
             agent_key=agent_key,
+            media_crawler_api_url=self.settings.media_crawler_api_url,
+            media_crawler_api_token=self.settings.media_crawler_api_token,
         )
         if runtime.provider != "demo":
             return await self._run_live(
@@ -200,7 +203,10 @@ class AgentRunner:
         tool_name: str | None = None
         tool_input: dict[str, Any] = {}
 
-        if agent_key == "pc-builder":
+        if agent_key == "media-crawler":
+            tool_name = "start_media_crawler_task"
+            tool_input = _parse_media_crawler_task(prompt)
+        elif agent_key == "pc-builder":
             budget_match = re.search(r"(\d{3,6})", prompt)
             tool_name = "generate_pc_build"
             tool_input = {
@@ -255,6 +261,8 @@ class AgentRunner:
                     answer = f"根据 Tavily 的联网结果：\n\n{result}"
                 elif tool_name == "generate_pc_build":
                     answer = _format_pc_build_answer(result)
+                elif tool_name == "start_media_crawler_task":
+                    answer = _format_media_crawler_answer(result)
                 else:
                     answer = (
                         f"`{tool_input['expression']}` 的计算结果是 "
@@ -267,7 +275,7 @@ class AgentRunner:
                     "tool.finished",
                     {"tool": trace.model_dump(mode="json")},
                 )
-                answer = f"联网工具执行失败：{error}"
+                answer = f"工具执行失败：{error}"
         else:
             answer = _demo_agent_answer(
                 prompt,
@@ -289,6 +297,217 @@ def _find_expression(prompt: str) -> str | None:
         if re.search(r"\d", compact) and re.search(r"[+\-*/%]", compact):
             return compact
     return None
+
+
+def _parse_media_crawler_task(prompt: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    match = re.search(
+        r"MEDIACRAWLER_TASK\s*```(?:json)?\s*(\{.*?\})\s*```",
+        prompt,
+        re.I | re.S,
+    )
+    if match is None:
+        match = re.search(r"MEDIACRAWLER_TASK\s*(\{.*\})", prompt, re.I | re.S)
+    if match:
+        try:
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, dict):
+                payload = parsed
+        except json.JSONDecodeError:
+            payload = {}
+
+    platforms = {
+        "xhs": ("xhs", "小红书", "xiaohongshu", "rednote"),
+        "dy": ("dy", "抖音", "douyin"),
+        "ks": ("ks", "快手", "kuaishou"),
+        "bili": ("bili", "b站", "哔哩哔哩", "bilibili"),
+        "wb": ("wb", "微博", "weibo"),
+        "tieba": ("tieba", "贴吧", "百度贴吧"),
+        "zhihu": ("zhihu", "知乎"),
+    }
+    prompt_lower = prompt.lower()
+    detected_platform = "xhs"
+    for platform, aliases in platforms.items():
+        if any(alias in prompt_lower for alias in aliases):
+            detected_platform = platform
+            break
+
+    task_match = re.search(r"任务[：:]\s*([^\n]+)", prompt)
+    if task_match:
+        task_text = task_match.group(1).lower()
+        if "创作者" in task_text or "creator" in task_text:
+            payload.setdefault("crawler_type", "creator")
+        elif "详情" in task_text or "detail" in task_text:
+            payload.setdefault("crawler_type", "detail")
+        elif "关键词" in task_text or "search" in task_text:
+            payload.setdefault("crawler_type", "search")
+
+    keyword_match = re.search(r"关键词[：:]\s*([^\n]+)", prompt)
+    if keyword_match:
+        payload.setdefault("keywords", keyword_match.group(1).strip())
+    target_match = re.search(r"目标[：:]\s*([^\n]+)", prompt)
+    if target_match:
+        payload.setdefault(
+            "targets",
+            [
+                item.strip()
+                for item in re.split(r"[，,]", target_match.group(1))
+                if item.strip()
+            ],
+        )
+
+    numeric_fields = {
+        "max_items": r"内容上限[：:]\s*(\d+)",
+        "max_comments": r"单篇评论上限[：:]\s*(\d+)",
+        "start_page": r"起始页[：:]\s*(\d+)",
+    }
+    for field, pattern in numeric_fields.items():
+        numeric_match = re.search(pattern, prompt)
+        if numeric_match:
+            payload.setdefault(field, int(numeric_match.group(1)))
+
+    boolean_fields = {
+        "include_comments": r"一级评论[：:]\s*(开启|关闭|是|否|true|false)",
+        "include_sub_comments": r"二级评论[：:]\s*(开启|关闭|是|否|true|false)",
+        "download_media": r"下载媒体[：:]\s*(开启|关闭|是|否|true|false)",
+    }
+    for field, pattern in boolean_fields.items():
+        boolean_match = re.search(pattern, prompt, re.I)
+        if boolean_match:
+            payload.setdefault(
+                field,
+                boolean_match.group(1).lower() in {"开启", "是", "true"},
+            )
+
+    save_match = re.search(r"导出格式[：:]\s*([a-z]+)", prompt, re.I)
+    if save_match:
+        payload.setdefault("save_option", save_match.group(1).lower())
+
+    platform = str(payload.get("platform") or detected_platform)
+    if platform not in platforms:
+        platform = detected_platform
+    crawler_type = str(payload.get("crawler_type") or "search")
+    if crawler_type not in {"search", "detail", "creator"}:
+        crawler_type = "search"
+
+    raw_targets = payload.get("targets") or []
+    if isinstance(raw_targets, str):
+        raw_targets = re.split(r"[,\n，]", raw_targets)
+    targets = [
+        str(item).strip()
+        for item in raw_targets
+        if str(item).strip()
+    ][:20]
+
+    url_match = re.search(r"https?://\S+", prompt)
+    if crawler_type != "search" and not targets and url_match:
+        targets = [url_match.group(0).rstrip("。，,)")]
+
+    keywords = str(payload.get("keywords") or "").strip()
+    if not keywords and crawler_type == "search":
+        marker_removed = re.sub(
+            r"MEDIACRAWLER_TASK\s*```(?:json)?\s*\{.*?\}\s*```",
+            "",
+            prompt,
+            flags=re.I | re.S,
+        )
+        keywords = " ".join(marker_removed.split())[:500]
+        keywords = re.sub(
+            r"^(请|帮我|使用|调用|MediaCrawler|采集|抓取|搜索|查找)\s*",
+            "",
+            keywords,
+            flags=re.I,
+        ).strip()
+        keywords = keywords or "热门内容"
+
+    def _bounded_int(key: str, default: int, low: int, high: int) -> int:
+        try:
+            value = int(payload.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(low, min(high, value))
+
+    save_option = str(payload.get("save_option") or "jsonl")
+    if save_option not in {"jsonl", "json", "csv", "excel", "sqlite"}:
+        save_option = "jsonl"
+
+    return {
+        "platform": platform,
+        "crawler_type": crawler_type,
+        "keywords": keywords,
+        "targets": targets,
+        "max_items": _bounded_int("max_items", 15, 1, 100),
+        "max_comments": _bounded_int("max_comments", 10, 0, 100),
+        "include_comments": bool(payload.get("include_comments", True)),
+        "include_sub_comments": bool(
+            payload.get("include_sub_comments", False)
+        ),
+        "download_media": bool(payload.get("download_media", False)),
+        "save_option": save_option,
+        "login_type": "cookie",
+        "start_page": _bounded_int("start_page", 1, 1, 100),
+        "headless": True,
+    }
+
+
+def _format_media_crawler_answer(result: dict[str, Any]) -> str:
+    platform = result.get("platform_label") or result.get("platform") or "目标平台"
+    mode = result.get("crawler_type_label") or result.get("crawler_type") or "采集"
+    summary = result.get("summary") or {}
+    query = summary.get("query") or ""
+    targets = summary.get("targets") or []
+    subject = query or "、".join(str(item) for item in targets[:3]) or "待补充"
+    status = result.get("status")
+
+    if status == "accepted":
+        heading = "MediaCrawler 任务已启动"
+        status_line = "任务正在独立采集服务中运行。"
+    elif status == "busy":
+        heading = "MediaCrawler 正在执行其他任务"
+        status_line = result.get("message") or "请稍后查看运行状态。"
+    elif status == "unavailable":
+        heading = "MediaCrawler 服务未连接"
+        status_line = result.get("message") or "请检查服务配置。"
+    elif status == "error":
+        heading = "MediaCrawler 任务启动失败"
+        status_line = result.get("message") or "请检查服务日志。"
+    else:
+        heading = "MediaCrawler 任务预览"
+        status_line = result.get("message") or "任务参数已生成。"
+
+    lines = [
+        f"## {heading}",
+        "",
+        status_line,
+        "",
+        f"- **平台：** {platform}",
+        f"- **任务：** {mode}",
+        f"- **对象：** {subject}",
+        f"- **数量上限：** {summary.get('max_items', '待定')}",
+        f"- **评论：** {'一级评论' if summary.get('comments') else '不采集'}",
+        f"- **导出：** {str(summary.get('save_option', 'jsonl')).upper()}",
+    ]
+    if status == "preview":
+        lines.extend(
+            [
+                "",
+                "### 接入真实采集",
+                "",
+                "部署 MediaCrawler WebUI API 后，在 Agent Chat 后端配置：",
+                "",
+                "```env",
+                "MEDIACRAWLER_API_URL=http://127.0.0.1:8080",
+                "MEDIACRAWLER_API_TOKEN=",
+                "```",
+                "",
+                "登录 Cookie 只保留在 MediaCrawler 本地服务，不要粘贴到聊天中。",
+            ]
+        )
+    warnings = result.get("warnings") or []
+    if warnings:
+        lines.extend(["", "### 使用边界", ""])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return "\n".join(lines)
 
 
 def _demo_answer(prompt: str) -> str:
