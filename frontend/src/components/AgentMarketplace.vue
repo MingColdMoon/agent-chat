@@ -8,6 +8,7 @@ import {
   ChartNoAxesCombined,
   Check,
   Cpu,
+  Database,
   FileText,
   Headset,
   LoaderCircle,
@@ -63,6 +64,7 @@ const iconMap = {
   business: BriefcaseBusiness,
   cpu: Cpu,
   radar: Radar,
+  database: Database,
 }
 
 const iconOptions = [

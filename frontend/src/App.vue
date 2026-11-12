@@ -10,14 +10,19 @@ import {
 import {
   ArrowUp,
   ChevronDown,
+  Files,
+  LoaderCircle,
   Menu,
   MessageSquareText,
+  Paperclip,
+  Plus,
   SlidersHorizontal,
   Sparkles,
   Store,
   X,
 } from 'lucide-vue-next'
 import AgentMarketplace from './components/AgentMarketplace.vue'
+import AttachmentChip from './components/AttachmentChip.vue'
 import AuthScreen from './components/AuthScreen.vue'
 import ChatMessage from './components/ChatMessage.vue'
 import ConversationSidebar from './components/ConversationSidebar.vue'
@@ -30,21 +35,25 @@ import {
   consumeEventStream,
   applyAgent,
   deleteAgent,
+  deleteAttachment,
   deleteConversation,
   ApiError,
   getConversation,
   getCurrentUser,
   getConversations,
+  getConversationAttachments,
   getHealth,
   getAgents,
   login,
   logout,
   register,
   sendMessage,
+  uploadAttachment,
 } from './api'
 import type {
   AgentCreatePayload,
   AgentSummary,
+  AttachmentSummary,
   AuthSubmission,
   ConversationSummary,
   Health,
@@ -131,8 +140,14 @@ const agentCreateOpen = ref(false)
 const agentsLoading = ref(false)
 const agentMutationBusy = ref(false)
 const agentError = ref('')
+const pendingAttachments = ref<AttachmentSummary[]>([])
+const conversationAttachments = ref<AttachmentSummary[]>([])
+const uploadBusy = ref(false)
+const draggingFiles = ref(false)
+const referenceOpen = ref(false)
 const runtimeSettings = reactive<RuntimeSettings>(createRuntimeSettings())
 const composer = ref<HTMLTextAreaElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 const messageScroller = ref<HTMLElement | null>(null)
 const stickToBottom = ref(true)
 let activeStreamController: AbortController | null = null
@@ -141,6 +156,16 @@ let streamCompleted = false
 function abortActiveStream() {
   activeStreamController?.abort()
   activeStreamController = null
+}
+
+function discardPendingFiles() {
+  const unbound = pendingAttachments.value.filter(
+    (attachment) => !attachment.referenced,
+  )
+  pendingAttachments.value = []
+  for (const attachment of unbound) {
+    void deleteAttachment(attachment.id).catch(() => undefined)
+  }
 }
 
 const suggestions = computed(() => {
@@ -179,7 +204,18 @@ const suggestions = computed(() => {
   ]
 })
 
-const sendDisabled = computed(() => busy.value || !input.value.trim())
+const sendDisabled = computed(
+  () =>
+    busy.value ||
+    uploadBusy.value ||
+    (!input.value.trim() && pendingAttachments.value.length === 0),
+)
+const referenceableAttachments = computed(() =>
+  conversationAttachments.value.filter(
+    (attachment) =>
+      !pendingAttachments.value.some((item) => item.id === attachment.id),
+  ),
+)
 const currentSummary = computed(() =>
   conversations.value.find((item) => item.id === currentId.value),
 )
@@ -420,6 +456,7 @@ async function handleAuthenticate(submission: AuthSubmission) {
 
 async function handleLogout() {
   abortActiveStream()
+  discardPendingFiles()
   try {
     await logout()
   } finally {
@@ -427,6 +464,9 @@ async function handleLogout() {
     conversations.value = []
     agents.value = []
     messages.value = []
+    conversationAttachments.value = []
+    referenceOpen.value = false
+    draggingFiles.value = false
     currentId.value = null
     currentTitle.value = '新会话'
     pageError.value = ''
@@ -454,17 +494,29 @@ async function loadConversationList() {
   if (selected) currentTitle.value = selected.title
 }
 
+async function loadConversationAttachments(conversationId: string) {
+  conversationAttachments.value = await getConversationAttachments(
+    conversationId,
+  )
+}
+
 async function selectConversation(id: string) {
-  if (busy.value || id === currentId.value) {
+  if (busy.value || uploadBusy.value || id === currentId.value) {
     sidebarOpen.value = false
     return
   }
   try {
-    const conversation = await getConversation(id)
+    const [conversation, attachments] = await Promise.all([
+      getConversation(id),
+      getConversationAttachments(id),
+    ])
     abortActiveStream()
+    discardPendingFiles()
     currentId.value = conversation.id
     currentTitle.value = conversation.title
     messages.value = conversation.messages
+    conversationAttachments.value = attachments
+    referenceOpen.value = false
     marketplaceOpen.value = false
     stickToBottom.value = true
     pageError.value = ''
@@ -499,7 +551,7 @@ async function refreshAgents() {
 }
 
 function openMarketplace() {
-  if (busy.value) return
+  if (busy.value || uploadBusy.value) return
   marketplaceOpen.value = true
   settingsOpen.value = false
   sidebarOpen.value = false
@@ -599,11 +651,15 @@ async function removeAgent(agent: AgentSummary) {
 }
 
 function startNewChat() {
-  if (busy.value) return
+  if (busy.value || uploadBusy.value) return
   abortActiveStream()
   currentId.value = null
   currentTitle.value = '新会话'
   messages.value = []
+  discardPendingFiles()
+  conversationAttachments.value = []
+  referenceOpen.value = false
+  draggingFiles.value = false
   marketplaceOpen.value = false
   stickToBottom.value = true
   pageError.value = ''
@@ -613,7 +669,13 @@ function startNewChat() {
 }
 
 async function removeConversation(id: string) {
-  if (busy.value || !window.confirm('删除这个会话？')) return
+  if (
+    busy.value ||
+    uploadBusy.value ||
+    !window.confirm('删除这个会话？')
+  ) {
+    return
+  }
   try {
     await deleteConversation(id)
     if (id === currentId.value) {
@@ -634,6 +696,8 @@ async function ensureConversation(): Promise<string> {
   const conversation = await createConversation()
   currentId.value = conversation.id
   currentTitle.value = conversation.title
+  conversationAttachments.value = []
+  referenceOpen.value = false
   conversations.value.unshift({
     id: conversation.id,
     title: conversation.title,
@@ -664,6 +728,7 @@ function handleStreamEvent(
           content: '',
           created_at: event.at,
           tools: [],
+          attachments: [],
           streaming: true,
           provider: event.provider,
           model: event.model,
@@ -780,15 +845,149 @@ async function refreshCurrentConversation() {
     const conversation = await getConversation(currentId.value)
     messages.value = conversation.messages
     currentTitle.value = conversation.title
+    await loadConversationAttachments(currentId.value)
     scrollToBottom()
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : '刷新会话失败'
   }
 }
 
+function openFilePicker() {
+  if (busy.value || uploadBusy.value) return
+  fileInput.value?.click()
+}
+
+function insertFileMention(attachment: AttachmentSummary) {
+  const mention = `@${attachment.filename}`
+  if (input.value.includes(mention)) return
+  input.value = `${input.value}${input.value.trim() ? ' ' : ''}${mention} `
+  void nextTick(() => {
+    resizeComposer()
+    composer.value?.focus()
+  })
+}
+
+function referenceAttachment(attachment: AttachmentSummary) {
+  if (
+    !pendingAttachments.value.some((item) => item.id === attachment.id)
+  ) {
+    pendingAttachments.value.push(attachment)
+  }
+  insertFileMention(attachment)
+  referenceOpen.value = false
+}
+
+async function uploadFiles(files: File[]) {
+  if (!files.length || busy.value || uploadBusy.value) return
+  const available = 5 - pendingAttachments.value.length
+  if (available <= 0) {
+    pageError.value = '每条消息最多引用 5 个文件'
+    return
+  }
+
+  const selected = files.slice(0, available)
+  if (files.length > available) {
+    pageError.value = '每条消息最多引用 5 个文件，已忽略多余文件'
+  }
+  const oversized = selected.find(
+    (file) => file.size > 15 * 1024 * 1024,
+  )
+  if (oversized) {
+    pageError.value = `文件 ${oversized.name} 超过 15 MB`
+    return
+  }
+
+  uploadBusy.value = true
+  statusText.value = '正在上传文件'
+  pageError.value = ''
+  try {
+    const conversationId = await ensureConversation()
+    for (const file of selected) {
+      try {
+        const attachment = await uploadAttachment(conversationId, file)
+        if (
+          !pendingAttachments.value.some(
+            (item) => item.id === attachment.id,
+          )
+        ) {
+          pendingAttachments.value.push(attachment)
+        }
+        if (
+          !conversationAttachments.value.some(
+            (item) => item.id === attachment.id,
+          )
+        ) {
+          conversationAttachments.value.push(attachment)
+        }
+      } catch (error) {
+        pageError.value =
+          error instanceof Error
+            ? `${file.name}：${error.message}`
+            : `${file.name} 上传失败`
+      }
+    }
+    statusText.value = pendingAttachments.value.length
+      ? `已引用 ${pendingAttachments.value.length} 个文件`
+      : '就绪'
+    void nextTick(() => composer.value?.focus())
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      expireSession()
+      return
+    }
+    pageError.value =
+      error instanceof Error ? error.message : '文件上传失败'
+    statusText.value = '上传失败'
+  } finally {
+    uploadBusy.value = false
+  }
+}
+
+async function handleFileInput(event: Event) {
+  const inputElement = event.target as HTMLInputElement
+  const files = Array.from(inputElement.files || [])
+  inputElement.value = ''
+  await uploadFiles(files)
+}
+
+async function handleFileDrop(event: DragEvent) {
+  draggingFiles.value = false
+  await uploadFiles(Array.from(event.dataTransfer?.files || []))
+}
+
+async function removePendingAttachment(attachment: AttachmentSummary) {
+  pendingAttachments.value = pendingAttachments.value.filter(
+    (item) => item.id !== attachment.id,
+  )
+  input.value = input.value.replace(`@${attachment.filename}`, '').trim()
+  if (!attachment.referenced) {
+    try {
+      await deleteAttachment(attachment.id)
+      conversationAttachments.value = conversationAttachments.value.filter(
+        (item) => item.id !== attachment.id,
+      )
+    } catch (error) {
+      pageError.value =
+        error instanceof Error ? error.message : '移除附件失败'
+    }
+  }
+  statusText.value = pendingAttachments.value.length
+    ? `已引用 ${pendingAttachments.value.length} 个文件`
+    : '就绪'
+  resizeComposer()
+}
+
 async function submitMessage() {
   const content = input.value.trim()
-  if (!content || busy.value) return
+  const submittedAttachments = [...pendingAttachments.value]
+  const attachmentIds = submittedAttachments.map((item) => item.id)
+  if (
+    (!content && attachmentIds.length === 0) ||
+    busy.value ||
+    uploadBusy.value
+  ) {
+    return
+  }
   const validationError = validateRuntimeSettings()
   if (validationError) {
     pageError.value = validationError
@@ -801,6 +1000,7 @@ async function submitMessage() {
   statusText.value = '正在提交'
   input.value = ''
   resizeComposer()
+  referenceOpen.value = false
 
   const optimisticId = `local-${crypto.randomUUID()}`
   messages.value.push({
@@ -809,6 +1009,7 @@ async function submitMessage() {
     content,
     created_at: new Date().toISOString(),
     tools: [],
+    attachments: submittedAttachments,
   })
   stickToBottom.value = true
   scrollToBottom(true)
@@ -819,6 +1020,7 @@ async function submitMessage() {
       conversationId,
       content,
       buildRunOptions(),
+      attachmentIds,
     )
     const optimistic = messages.value.find((item) => item.id === optimisticId)
     if (optimistic) {
@@ -827,10 +1029,14 @@ async function submitMessage() {
         model: result.model,
       })
     }
+    pendingAttachments.value = []
     void loadConversationList()
+    void loadConversationAttachments(conversationId)
     attachStream(result.stream_url)
   } catch (error) {
     busy.value = false
+    if (!input.value) input.value = content
+    resizeComposer()
     if (error instanceof ApiError && error.status === 401) {
       expireSession()
       return
@@ -1030,6 +1236,8 @@ onBeforeUnmount(() => {
                 ? '告诉我你的装机需求'
                 : currentAgent?.key === 'media-crawler'
                   ? '配置一次公开数据采集'
+                  : currentAgent?.key === 'rag-assistant'
+                    ? '向你的文件提问'
                 : '今天想了解什么？'
             }}
           </h2>
@@ -1043,6 +1251,38 @@ onBeforeUnmount(() => {
             :disabled="busy"
             @submit="useSuggestion"
           />
+          <div
+            v-else-if="currentAgent?.key === 'rag-assistant'"
+            class="rag-starter"
+          >
+            <div class="rag-starter-head">
+              <span>RAG PIPELINE</span>
+              <strong>
+                {{
+                  conversationAttachments.length
+                    ? `${conversationAttachments.length} 个知识文件`
+                    : '尚无知识文件'
+                }}
+              </strong>
+            </div>
+            <div class="rag-starter-flow">
+              <button
+                type="button"
+                :disabled="busy || uploadBusy"
+                @click="openFilePicker"
+              >
+                <LoaderCircle
+                  v-if="uploadBusy"
+                  class="spin"
+                  :size="16"
+                />
+                <Paperclip v-else :size="16" />
+                添加知识文件
+              </button>
+              <span><strong>24</strong> 候选召回</span>
+              <span><strong>5</strong> Rerank</span>
+            </div>
+          </div>
           <div v-else class="suggestion-list">
             <button
               v-for="suggestion in suggestions"
@@ -1068,27 +1308,132 @@ onBeforeUnmount(() => {
         <footer class="composer-area">
         <form
           class="composer"
+          :class="{ dragging: draggingFiles }"
           @submit.prevent="submitMessage"
+          @dragover.prevent="draggingFiles = true"
+          @dragleave.prevent="draggingFiles = false"
+          @drop.prevent="handleFileDrop"
+          @keydown.esc="referenceOpen = false"
         >
-          <textarea
-            ref="composer"
-            v-model="input"
-            rows="1"
-            maxlength="20000"
-            placeholder="给 Agent 发送消息"
-            aria-label="消息内容"
-            @input="resizeComposer"
-            @keydown="handleComposerKeydown"
-          ></textarea>
-          <button
-            class="send-button"
-            type="submit"
-            :disabled="sendDisabled"
-            title="发送消息"
-            aria-label="发送消息"
+          <input
+            ref="fileInput"
+            class="composer-file-input"
+            type="file"
+            multiple
+            accept=".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.xml,.html,.css,.js,.jsx,.ts,.tsx,.vue,.py,.java,.go,.rs,.c,.cpp,.h,.sql,.sh,.toml,.ini,.log,.tex,.pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,.svg"
+            @change="handleFileInput"
+          />
+
+          <div
+            v-if="pendingAttachments.length"
+            class="composer-attachments"
           >
-            <ArrowUp :size="19" :stroke-width="2" />
-          </button>
+            <AttachmentChip
+              v-for="attachment in pendingAttachments"
+              :key="attachment.id"
+              :attachment="attachment"
+              compact
+              removable
+              @select="insertFileMention"
+              @remove="removePendingAttachment"
+            />
+            <span class="composer-attachment-count">
+              {{ pendingAttachments.length }}/5
+            </span>
+          </div>
+
+          <div class="composer-entry">
+            <div class="composer-tools">
+              <button
+                class="composer-tool"
+                type="button"
+                title="上传文件"
+                aria-label="上传文件"
+                :disabled="busy || uploadBusy"
+                @click="openFilePicker"
+              >
+                <LoaderCircle
+                  v-if="uploadBusy"
+                  class="spin"
+                  :size="16"
+                />
+                <Paperclip v-else :size="16" />
+              </button>
+              <button
+                class="composer-tool composer-reference"
+                type="button"
+                title="引用当前会话中的文件"
+                aria-label="引用当前会话中的文件"
+                :disabled="
+                  busy ||
+                  uploadBusy ||
+                  referenceableAttachments.length === 0
+                "
+                @click="referenceOpen = !referenceOpen"
+              >
+                <Files :size="15" />
+                <span>引用</span>
+              </button>
+            </div>
+
+            <textarea
+              ref="composer"
+              v-model="input"
+              rows="1"
+              maxlength="20000"
+              placeholder="给 Agent 发送消息，或拖入文件"
+              aria-label="消息内容"
+              @input="resizeComposer"
+              @keydown="handleComposerKeydown"
+            ></textarea>
+            <button
+              class="send-button"
+              type="submit"
+              :disabled="sendDisabled"
+              :title="uploadBusy ? '正在上传文件' : '发送消息'"
+              aria-label="发送消息"
+            >
+              <ArrowUp :size="19" :stroke-width="2" />
+            </button>
+          </div>
+
+          <div v-if="draggingFiles" class="composer-drop-hint">
+            <Paperclip :size="18" />
+            松开以上传并引用文件
+          </div>
+
+          <Transition name="settings-fade">
+            <div v-if="referenceOpen" class="file-reference-menu">
+              <header>
+                <span>引用当前会话文件</span>
+                <button
+                  type="button"
+                  title="关闭文件引用"
+                  aria-label="关闭文件引用"
+                  @click="referenceOpen = false"
+                >
+                  <X :size="14" />
+                </button>
+              </header>
+              <div class="file-reference-list">
+                <button
+                  v-for="attachment in referenceableAttachments"
+                  :key="attachment.id"
+                  type="button"
+                  class="file-reference-item"
+                  @click="referenceAttachment(attachment)"
+                >
+                  <span>
+                    <strong>{{ attachment.filename }}</strong>
+                    <small>
+                      {{ attachment.excerpt || '文件已上传' }}
+                    </small>
+                  </span>
+                  <Plus :size="15" />
+                </button>
+              </div>
+            </div>
+          </Transition>
         </form>
         <div class="composer-status">
           <span

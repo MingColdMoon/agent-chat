@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     tavily_api_url: str = DEFAULT_TAVILY_API_URL
     media_crawler_api_url: str | None = None
     media_crawler_api_token: str | None = None
+    upload_dir: str = "data/uploads"
+    max_upload_bytes: int = Field(
+        default=15 * 1024 * 1024,
+        ge=1024,
+        le=50 * 1024 * 1024,
+    )
+    max_attachments_per_message: int = Field(default=5, ge=1, le=10)
     database_url: str = (
         "postgresql+asyncpg://agent:agent@127.0.0.1:5433/agent_chat"
     )

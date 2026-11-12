@@ -15,6 +15,19 @@ class ToolTrace(BaseModel):
     output: Any | None = None
 
 
+class AttachmentSummary(BaseModel):
+    id: str
+    filename: str
+    content_type: str
+    extension: str
+    size_bytes: int
+    excerpt: str = ""
+    text_length: int = 0
+    referenced: bool = False
+    created_at: str
+    extracted_text: str | None = Field(default=None, exclude=True)
+
+
 class Message(BaseModel):
     id: str
     role: Role
@@ -25,6 +38,7 @@ class Message(BaseModel):
     provider: str | None = None
     model: str | None = None
     activity: dict[str, Any] | None = None
+    attachments: list[AttachmentSummary] = Field(default_factory=list)
 
 
 class AgentSummary(BaseModel):
@@ -104,7 +118,8 @@ class RuntimeConfig(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=20_000)
+    content: str = Field(default="", max_length=20_000)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=10)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
 
@@ -115,6 +130,14 @@ class SendMessageResponse(BaseModel):
     stream_url: str
     provider: ProviderId
     model: str
+
+
+class AttachmentResponse(BaseModel):
+    attachment: AttachmentSummary
+
+
+class AttachmentListResponse(BaseModel):
+    attachments: list[AttachmentSummary]
 
 
 class HealthResponse(BaseModel):

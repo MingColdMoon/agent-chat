@@ -1,8 +1,8 @@
 # Agent Chat
 
 一个基于 FastAPI、LangChain 和 Vue 3 的多用户智能体对话应用，包含 JWT 登录、
-智能体广场、工具调用、联网搜索、MediaCrawler 数据采集工作台、SSE 流式回答
-以及 PostgreSQL/Redis 持久化。
+智能体广场、文件上传与引用、RAG 检索重排、工具调用、联网搜索、
+MediaCrawler 数据采集工作台、SSE 流式回答以及 PostgreSQL/Redis 持久化。
 
 ![智能体广场](docs/images/marketplace.png)
 
@@ -10,11 +10,13 @@
 
 ### 智能体广场
 
-- 默认内置 **智能客服**、**智能自动化报表**、**装机大师** 和
-  **MediaCrawler 采集助手**。
+- 默认内置 **智能客服**、**智能自动化报表**、**知识库 RAG**、**装机大师**
+  和 **MediaCrawler 采集助手**。
 - 装机大师使用 AG-UI 活动事件展示可交互装机配置与硬件清单。
 - MediaCrawler 采集助手支持小红书、抖音、快手、B站、微博、贴吧和知乎的
   关键词搜索、内容详情、创作者主页、评论与媒体任务配置。
+- 知识库 RAG 支持上传 PDF、DOCX、文本与代码文件，自动切块，通过 BM25
+  方式召回候选片段，再执行本地覆盖度 Rerank。
 - 用户可以创建自己的智能体，配置名称、分类、图标、简介和系统指令。
 - 自定义智能体只对创建者可见。
 - 可以开始一个新智能体会话，也可以把智能体应用到当前会话。
@@ -31,6 +33,8 @@
 ### Agent 对话
 
 - LangChain `bind_tools()` 工具调用循环。
+- 文件上传、附件引用、会话内历史文件复用与鉴权下载。
+- RAG 知识库切块、候选召回、Rerank 和来源引用。
 - SSE 增量输出和断线重连。
 - 工具调用过程可视化。
 - 会话历史上下文。
@@ -52,6 +56,7 @@
 - `start_media_crawler_task`：向独立 MediaCrawler WebUI API 提交采集任务
 - `get_media_crawler_status`：读取采集状态与最近日志
 - `list_media_crawler_files`：读取 JSON、CSV 或 Excel 导出文件
+- `search_knowledge_base`：召回并重排当前会话知识库片段
 
 ## 功能预览
 
@@ -75,6 +80,14 @@
 
 ![MediaCrawler 任务结果](docs/images/media-crawler-task.png)
 
+### 文件引用与知识库 RAG
+
+![上传并引用知识文件](docs/images/rag-file-ready.png)
+
+![RAG 召回与 Rerank](docs/images/rag-retrieval.png)
+
+![历史文件再次引用](docs/images/rag-file-reference.png)
+
 ### 用户登录
 
 ![用户登录](docs/images/login-desktop.png)
@@ -93,6 +106,7 @@
 | 模型 | ChatOpenAI、OpenAI/DeepSeek/自定义兼容接口 |
 | 搜索 | Tavily API |
 | 数据采集 | MediaCrawler WebUI API、Playwright、可选 CDP |
+| 文件与 RAG | PDF/DOCX/文本提取、BM25 召回、覆盖度 Rerank |
 | 认证 | PyJWT、Argon2、Redis Token 吊销 |
 | 数据库 | PostgreSQL 16、SQLAlchemy Async、asyncpg |
 | 缓存 | Redis 7 |
@@ -191,18 +205,32 @@ API Key 只保存在当前标签页的 `sessionStorage`，不会写入 PostgreSQ
 ## 智能体使用
 
 1. 登录后点击侧边栏“智能体广场”。
-2. 选择内置智能体“智能客服”“智能自动化报表”“装机大师”或
-   “MediaCrawler 采集助手”。
+2. 选择内置智能体“智能客服”“智能自动化报表”“知识库 RAG”“装机大师”
+   或“MediaCrawler 采集助手”。
 3. 点击“开始对话”创建新会话，或点击“应用到当前”切换当前会话角色。
 4. 点击“创建智能体”定义自己的角色和系统指令。
 5. 自定义智能体会出现在“我的智能体”区域，仅当前用户可见。
 
 真实模型模式下，智能体系统指令会注入 LangChain `SystemMessage`。演示模式下，
-内置智能体会返回对应的客服、报表、装机或 MediaCrawler 任务预览，便于无 API Key
-验证完整流程。
+内置智能体会返回对应的客服、报表、RAG、装机或 MediaCrawler 任务预览，
+便于无 API Key 验证完整流程。
 装机大师通过 AG-UI 的 `STATE_SNAPSHOT` 与 `ACTIVITY_SNAPSHOT` 渲染预算滑杆、
 用途选择器、硬件清单和兼容性提示。MediaCrawler 通过同样的活动事件渲染任务状态、
 平台、采集数量、评论与导出配置。
+
+## 文件上传与 RAG
+
+- 单文件上限 15 MB，每条消息最多引用 5 个文件。
+- 支持文本、Markdown、CSV、JSON、代码、PDF、DOCX，以及图片文件引用。
+- 上传文件按用户和会话隔离，下载接口继续使用 JWT 鉴权。
+- 文本会按约 900 字符切块并保留 120 字符重叠。
+- 提问时先使用 BM25 召回最多 24 个候选，再按覆盖度、短语命中、检索分数与
+  文件名词权重执行 `lexical-coverage-v1` Rerank，保留最多 5 个片段。
+- RAG 结果通过 AG-UI 活动卡片展示召回数、重排数、来源文件、片段和分数。
+- 未与消息关联的临时附件会在 24 小时后自动清理。
+
+Docker 部署使用 `uploads_data` 卷持久化上传文件；本地开发默认保存到
+`backend/data/uploads`。
 
 ## MediaCrawler 接入
 
@@ -312,6 +340,10 @@ agent-chat/
 | `GET` | `/api/conversations` | 当前用户会话 |
 | `POST` | `/api/conversations` | 新建会话，可绑定智能体 |
 | `PATCH` | `/api/conversations/{id}/agent` | 给现有会话应用智能体 |
+| `GET` | `/api/conversations/{id}/attachments` | 当前会话附件 |
+| `POST` | `/api/conversations/{id}/attachments` | 上传文件 |
+| `GET` | `/api/attachments/{id}/download` | 鉴权下载附件 |
+| `DELETE` | `/api/attachments/{id}` | 删除未引用附件 |
 | `POST` | `/api/conversations/{id}/messages` | 启动一轮问答 |
 | `GET` | `/api/runs/{id}/events` | SSE 事件流 |
 
@@ -321,6 +353,7 @@ agent-chat/
 - 认证使用 JWT Bearer Header，不依赖认证 Cookie。
 - JWT 登出后会在 Redis 中记录到原过期时间。
 - 用户自定义智能体带所有者约束，其他用户无法读取或应用。
+- 附件同时校验用户、会话和消息引用关系，不能跨用户下载。
 - 会话查询始终同时限制会话 ID 和用户 ID。
 - 仓库中不包含真实 API Key、用户密码或生产数据库数据。
 
@@ -329,6 +362,7 @@ agent-chat/
 - [智能体广场实现说明](docs/agent-marketplace.md)
 - [装机大师与 AG-UI 实现说明](docs/agui-pc-builder.md)
 - [MediaCrawler 内置智能体说明](docs/media-crawler-agent.md)
+- [文件引用与 RAG Rerank 说明](docs/file-rag.md)
 - [LeiBox 风格界面说明](docs/leibox-ui.md)
 - [JWT 登录、PostgreSQL 与 Redis 实现说明](docs/auth-redis-postgresql.md)
 

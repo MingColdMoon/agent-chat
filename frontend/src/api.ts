@@ -1,6 +1,7 @@
 import type {
   AgentCreatePayload,
   AgentSummary,
+  AttachmentSummary,
   AuthResponse,
   Conversation,
   ConversationSummary,
@@ -38,7 +39,9 @@ function clearAccessToken() {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers)
-  headers.set('Content-Type', 'application/json')
+  if (!(options?.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json')
+  }
   const accessToken = getAccessToken()
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`)
@@ -245,16 +248,74 @@ export function deleteConversation(id: string): Promise<void> {
   return request<void>(`/api/conversations/${id}`, { method: 'DELETE' })
 }
 
+export async function getConversationAttachments(
+  conversationId: string,
+): Promise<AttachmentSummary[]> {
+  const result = await request<{ attachments: AttachmentSummary[] }>(
+    `/api/conversations/${conversationId}/attachments`,
+  )
+  return result.attachments
+}
+
+export async function uploadAttachment(
+  conversationId: string,
+  file: File,
+): Promise<AttachmentSummary> {
+  const body = new FormData()
+  body.append('file', file, file.name)
+  const result = await request<{ attachment: AttachmentSummary }>(
+    `/api/conversations/${conversationId}/attachments`,
+    {
+      method: 'POST',
+      body,
+    },
+  )
+  return result.attachment
+}
+
+export function deleteAttachment(id: string): Promise<void> {
+  return request<void>(`/api/attachments/${id}`, { method: 'DELETE' })
+}
+
+export async function downloadAttachment(id: string): Promise<Blob> {
+  const headers = new Headers()
+  const accessToken = getAccessToken()
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+  const response = await fetch(
+    `${API_BASE}/api/attachments/${id}/download`,
+    { headers },
+  )
+  if (!response.ok) {
+    let message = `下载失败 (${response.status})`
+    try {
+      const body = await response.json()
+      message = body.detail || message
+    } catch {
+      // Keep fallback.
+    }
+    if (response.status === 401) clearAccessToken()
+    throw new ApiError(message, response.status)
+  }
+  return response.blob()
+}
+
 export function sendMessage(
   conversationId: string,
   content: string,
   runtime: RunOptions,
+  attachmentIds: string[] = [],
 ): Promise<SendMessageResponse> {
   return request<SendMessageResponse>(
     `/api/conversations/${conversationId}/messages`,
     {
       method: 'POST',
-      body: JSON.stringify({ content, runtime }),
+      body: JSON.stringify({
+        content,
+        runtime,
+        attachment_ids: attachmentIds,
+      }),
     },
   )
 }

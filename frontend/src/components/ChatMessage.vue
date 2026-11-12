@@ -13,20 +13,26 @@ import {
 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import type {
+  AttachmentSummary,
   MediaCrawlerTaskResult,
   Message,
   PcBuildPlan,
+  RagRetrievalResult,
   ToolTrace,
 } from '../types'
+import { downloadAttachment } from '../api'
+import AttachmentChip from './AttachmentChip.vue'
 import LeiBoxDotLoader from './LeiBoxDotLoader.vue'
 import MediaCrawlerTaskCard from './MediaCrawlerTaskCard.vue'
 import PcBuildCard from './PcBuildCard.vue'
+import RagRetrievalCard from './RagRetrievalCard.vue'
 
 const props = defineProps<{
   message: Message
 }>()
 
 const copied = ref(false)
+const attachmentError = ref('')
 const markdown = new MarkdownIt({
   html: false,
   linkify: true,
@@ -53,6 +59,7 @@ const toolLabels: Record<string, string> = {
   start_media_crawler_task: '启动采集任务',
   get_media_crawler_status: '读取采集状态',
   list_media_crawler_files: '读取导出文件',
+  search_knowledge_base: '知识库召回与重排',
 }
 
 function toolLabel(tool: ToolTrace): string {
@@ -71,6 +78,25 @@ async function copyMessage() {
   window.setTimeout(() => {
     copied.value = false
   }, 1400)
+}
+
+async function openAttachment(attachment: AttachmentSummary) {
+  attachmentError.value = ''
+  try {
+    const blob = await downloadAttachment(attachment.id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = attachment.filename
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
+  } catch (error) {
+    attachmentError.value =
+      error instanceof Error ? error.message : '附件下载失败'
+  }
 }
 </script>
 
@@ -158,6 +184,18 @@ async function copyMessage() {
       <span>{{ message.error }}</span>
     </div>
 
+    <div v-if="message.attachments?.length" class="message-attachments">
+      <AttachmentChip
+        v-for="attachment in message.attachments"
+        :key="attachment.id"
+        :attachment="attachment"
+        @select="openAttachment"
+      />
+      <span v-if="attachmentError" class="attachment-error">
+        {{ attachmentError }}
+      </span>
+    </div>
+
     <PcBuildCard
       v-if="message.activity?.activityType === 'pc-build-plan'"
       :plan="message.activity.content as unknown as PcBuildPlan"
@@ -165,6 +203,12 @@ async function copyMessage() {
     <MediaCrawlerTaskCard
       v-if="message.activity?.activityType === 'media-crawler-task'"
       :task="message.activity.content as unknown as MediaCrawlerTaskResult"
+    />
+    <RagRetrievalCard
+      v-if="message.activity?.activityType === 'rag-retrieval'"
+      :retrieval="
+        message.activity.content as unknown as RagRetrievalResult
+      "
     />
 
     <button

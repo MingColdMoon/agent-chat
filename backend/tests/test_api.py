@@ -19,6 +19,7 @@ def build_app(
         tavily_api_key=None,
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         redis_url="redis://127.0.0.1:6399/15",
+        upload_dir=str(tmp_path / "uploads"),
         login_rate_limit=login_rate_limit,
         jwt_secret="test-jwt-secret-with-at-least-32-characters",
     )
@@ -196,6 +197,7 @@ def test_conversations_survive_app_restart(tmp_path: Path) -> None:
         openai_api_key=None,
         database_url=f"sqlite+aiosqlite:///{database_path}",
         redis_url="redis://127.0.0.1:6399/15",
+        upload_dir=str(tmp_path / "uploads"),
         jwt_secret="test-jwt-secret-with-at-least-32-characters",
     )
 
@@ -251,6 +253,7 @@ def test_builtin_agents_are_seeded_for_every_user(tmp_path: Path) -> None:
     assert [agent["name"] for agent in agents] == [
         "智能客服",
         "智能自动化报表",
+        "知识库 RAG",
         "装机大师",
         "MediaCrawler 采集助手",
     ]
@@ -495,4 +498,183 @@ def test_media_crawler_emits_task_preview_activity(tmp_path: Path) -> None:
     assert assistant["activity"]["content"]["platform"] == "xhs"
     assert assistant["activity"]["content"]["status"] == "preview"
     assert assistant["activity"]["content"]["summary"]["max_items"] == 12
+
+
+def test_file_upload_message_reference_and_download(tmp_path: Path) -> None:
+    with build_app(tmp_path) as client:
+        auth = register(client)
+        headers = auth_headers(auth["access_token"])
+        conversation_id = client.post(
+            "/api/conversations",
+            headers=headers,
+        ).json()["conversation"]["id"]
+
+        uploaded = client.post(
+            f"/api/conversations/{conversation_id}/attachments",
+            headers=headers,
+            files={
+                "file": (
+                    "售后政策.md",
+                    "# 售后政策\n\n签收后七天内可以申请无理由退款。",
+                    "text/markdown",
+                )
+            },
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        attachment = uploaded.json()["attachment"]
+        assert attachment["filename"] == "售后政策.md"
+        assert attachment["text_length"] > 0
+        assert attachment["referenced"] is False
+
+        listed = client.get(
+            f"/api/conversations/{conversation_id}/attachments",
+            headers=headers,
+        )
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["attachments"]] == [
+            attachment["id"]
+        ]
+
+        sent = client.post(
+            f"/api/conversations/{conversation_id}/messages",
+            headers=headers,
+            json={
+                "content": "请引用售后政策回答",
+                "attachment_ids": [attachment["id"]],
+                "runtime": {"provider": "demo"},
+            },
+        )
+        assert sent.status_code == 202, sent.text
+        stream_body = read_stream(
+            client,
+            sent.json()["stream_url"],
+            auth["access_token"],
+        )
+        assert "已读取引用文件" in stream_body
+
+        stored = client.get(
+            f"/api/conversations/{conversation_id}",
+            headers=headers,
+        ).json()["conversation"]
+        user_message = stored["messages"][0]
+        assert user_message["attachments"][0]["filename"] == "售后政策.md"
+
+        downloaded = client.get(
+            f"/api/attachments/{attachment['id']}/download",
+            headers=headers,
+        )
+        assert downloaded.status_code == 200
+        assert "七天内" in downloaded.text
+
+        bob = register(client, "bob")
+        bob_headers = auth_headers(bob["access_token"])
+        assert (
+            client.get(
+                f"/api/attachments/{attachment['id']}/download",
+                headers=bob_headers,
+            ).status_code
+            == 404
+        )
+
+
+def test_unbound_attachment_can_be_removed(tmp_path: Path) -> None:
+    with build_app(tmp_path) as client:
+        auth = register(client)
+        headers = auth_headers(auth["access_token"])
+        conversation_id = client.post(
+            "/api/conversations",
+            headers=headers,
+        ).json()["conversation"]["id"]
+        attachment = client.post(
+            f"/api/conversations/{conversation_id}/attachments",
+            headers=headers,
+            files={"file": ("draft.txt", b"draft content", "text/plain")},
+        ).json()["attachment"]
+
+        deleted = client.delete(
+            f"/api/attachments/{attachment['id']}",
+            headers=headers,
+        )
+        assert deleted.status_code == 204
+        listed = client.get(
+            f"/api/conversations/{conversation_id}/attachments",
+            headers=headers,
+        ).json()["attachments"]
+        assert listed == []
+
+
+def test_rag_agent_returns_retrieval_and_rerank_activity(
+    tmp_path: Path,
+) -> None:
+    with build_app(tmp_path) as client:
+        auth = register(client)
+        headers = auth_headers(auth["access_token"])
+        agents = client.get("/api/agents", headers=headers).json()["agents"]
+        rag_agent = next(
+            agent for agent in agents if agent["key"] == "rag-assistant"
+        )
+        conversation_id = client.post(
+            "/api/conversations",
+            headers=headers,
+            json={"agent_id": rag_agent["id"]},
+        ).json()["conversation"]["id"]
+
+        uploaded = client.post(
+            f"/api/conversations/{conversation_id}/attachments",
+            headers=headers,
+            files={
+                "file": (
+                    "退款规则.txt",
+                    "退款规则：订单签收后七天内可申请无理由退款，"
+                    "超过七天需要人工审核。",
+                    "text/plain",
+                )
+            },
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        attachment_id = uploaded.json()["attachment"]["id"]
+
+        sent = client.post(
+            f"/api/conversations/{conversation_id}/messages",
+            headers=headers,
+            json={
+                "content": "退款期限是几天？",
+                "attachment_ids": [attachment_id],
+                "runtime": {"provider": "demo"},
+            },
+        )
+        assert sent.status_code == 202
+        stream_body = read_stream(
+            client,
+            sent.json()["stream_url"],
+            auth["access_token"],
+        )
+        second = client.post(
+            f"/api/conversations/{conversation_id}/messages",
+            headers=headers,
+            json={
+                "content": "超过退款期限怎么办？",
+                "attachment_ids": [attachment_id],
+                "runtime": {"provider": "demo"},
+            },
+        )
+        assert second.status_code == 202
+        read_stream(
+            client,
+            second.json()["stream_url"],
+            auth["access_token"],
+        )
+        stored = client.get(
+            f"/api/conversations/{conversation_id}",
+            headers=headers,
+        ).json()["conversation"]
+
+    assert "知识库检索完成" in stream_body
+    assert '"activityType": "rag-retrieval"' in stream_body
+    assistant = stored["messages"][-1]
+    activity = assistant["activity"]
+    assert activity["activityType"] == "rag-retrieval"
+    assert activity["content"]["candidate_count"] >= 1
+    assert activity["content"]["rerank"] == "lexical-coverage-v1"
+    assert activity["content"]["items"][0]["filename"] == "退款规则.txt"
 

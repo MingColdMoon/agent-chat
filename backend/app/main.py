@@ -7,9 +7,17 @@ from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent import AgentRunner
@@ -22,14 +30,26 @@ from app.auth import (
     user_to_info,
     verify_password,
 )
-from app.config import Settings, get_settings, resolve_runtime_config
+from app.config import (
+    Settings,
+    application_home,
+    get_settings,
+    resolve_runtime_config,
+)
 from app.database import Database
 from app.events import RunManager, RunState
+from app.files import (
+    AttachmentError,
+    AttachmentStore,
+    attachment_to_summary,
+)
 from app.models import (
     AgentCreateRequest,
     AgentListResponse,
     AgentResponse,
     ApplyAgentRequest,
+    AttachmentListResponse,
+    AttachmentResponse,
     AuthCredentials,
     AuthResponse,
     ConversationListResponse,
@@ -42,8 +62,10 @@ from app.models import (
     RuntimeConfig,
     SendMessageRequest,
     SendMessageResponse,
+    ToolTrace,
     UserInfo,
 )
+from app.rag import RagStore
 from app.sessions import RedisSessionStore, SessionStore
 from app.storage import (
     AgentStore,
@@ -65,6 +87,15 @@ def create_app(
     user_store = UserStore(database.session_factory)
     agent_store = AgentStore(database.session_factory)
     conversation_store = ConversationStore(database.session_factory)
+    upload_root = Path(settings.upload_dir)
+    if not upload_root.is_absolute():
+        upload_root = application_home() / upload_root
+    attachment_store = AttachmentStore(
+        database.session_factory,
+        upload_root,
+        settings.max_upload_bytes,
+    )
+    rag_store = RagStore(database.session_factory)
     runs = RunManager()
     agent = AgentRunner(settings)
     run_tasks: set[asyncio.Task[None]] = set()
@@ -72,6 +103,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await database.initialize()
+        upload_root.mkdir(parents=True, exist_ok=True)
+        await attachment_store.cleanup_stale_unbound()
         await agent_store.seed_builtins()
         await session_store.initialize()
         try:
@@ -151,6 +184,7 @@ def create_app(
             "get_current_time",
             "calculator",
             "generate_pc_build",
+            "search_knowledge_base",
             "start_media_crawler_task",
             "get_media_crawler_status",
             "list_media_crawler_files",
@@ -351,6 +385,104 @@ def create_app(
             raise HTTPException(status_code=404, detail="会话不存在")
         return ConversationResponse(conversation=conversation)
 
+    @app.get(
+        "/api/conversations/{conversation_id}/attachments",
+        response_model=AttachmentListResponse,
+    )
+    async def list_conversation_attachments(
+        conversation_id: str,
+        user: CurrentUser,
+    ) -> AttachmentListResponse:
+        conversation = await conversation_store.get(
+            user.id,
+            conversation_id,
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return AttachmentListResponse(
+            attachments=await attachment_store.list_conversation(
+                user.id,
+                conversation_id,
+            )
+        )
+
+    @app.post(
+        "/api/conversations/{conversation_id}/attachments",
+        response_model=AttachmentResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_conversation_attachment(
+        conversation_id: str,
+        user: CurrentUser,
+        file: UploadFile = File(...),
+    ) -> AttachmentResponse:
+        conversation = await conversation_store.get(
+            user.id,
+            conversation_id,
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+        data = await file.read(settings.max_upload_bytes + 1)
+        try:
+            attachment = await attachment_store.create(
+                user.id,
+                conversation_id,
+                file.filename or "未命名文件",
+                file.content_type or "application/octet-stream",
+                data,
+            )
+            await rag_store.index_attachment(
+                attachment_id=attachment.id,
+                user_id=user.id,
+                conversation_id=conversation_id,
+                filename=attachment.filename,
+                text=attachment.extracted_text,
+            )
+        except AttachmentError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        finally:
+            await file.close()
+        return AttachmentResponse(attachment=attachment)
+
+    @app.get("/api/attachments/{attachment_id}/download")
+    async def download_attachment(
+        attachment_id: str,
+        user: CurrentUser,
+    ):
+        attachment = await attachment_store.get_owned(
+            user.id,
+            attachment_id,
+        )
+        if attachment is None:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        path = Path(attachment.storage_path)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="附件文件已丢失")
+        return FileResponse(
+            path=path,
+            filename=attachment.filename,
+            media_type=attachment.content_type,
+        )
+
+    @app.delete(
+        "/api/attachments/{attachment_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def delete_attachment(
+        attachment_id: str,
+        user: CurrentUser,
+    ) -> None:
+        deleted = await attachment_store.delete_unbound(
+            user.id,
+            attachment_id,
+        )
+        if not deleted:
+            raise HTTPException(
+                status_code=404,
+                detail="附件不存在或已被消息引用",
+            )
+
     @app.delete(
         "/api/conversations/{conversation_id}",
         status_code=status.HTTP_204_NO_CONTENT,
@@ -359,12 +491,17 @@ def create_app(
         conversation_id: str,
         user: CurrentUser,
     ) -> None:
+        files = await attachment_store.conversation_file_paths(
+            user.id,
+            conversation_id,
+        )
         deleted = await conversation_store.delete(
             user.id,
             conversation_id,
         )
         if not deleted:
             raise HTTPException(status_code=404, detail="会话不存在")
+        attachment_store.delete_paths(files)
 
     @app.post(
         "/api/conversations/{conversation_id}/messages",
@@ -384,8 +521,31 @@ def create_app(
             raise HTTPException(status_code=404, detail="会话不存在")
 
         content = payload.content.strip()
-        if not content:
-            raise HTTPException(status_code=400, detail="消息不能为空")
+        if len(payload.attachment_ids) > settings.max_attachments_per_message:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"每条消息最多引用 "
+                    f"{settings.max_attachments_per_message} 个文件"
+                ),
+            )
+        if not content and not payload.attachment_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="消息不能为空",
+            )
+        try:
+            attachment_records = await attachment_store.validate_pending(
+                user.id,
+                conversation_id,
+                payload.attachment_ids,
+            )
+        except AttachmentError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        attachment_summaries = [
+            attachment_to_summary(record)
+            for record in attachment_records
+        ]
         try:
             runtime = resolve_runtime_config(payload.runtime, settings)
         except ValueError as error:
@@ -396,12 +556,17 @@ def create_app(
             role="user",
             content=content,
             created_at=utc_now(),
+            attachments=attachment_summaries,
         )
-        await conversation_store.add_message(
-            user.id,
-            conversation_id,
-            user_message,
-        )
+        try:
+            await conversation_store.add_message(
+                user.id,
+                conversation_id,
+                user_message,
+                payload.attachment_ids,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         run = await runs.create(conversation_id, user.id)
         assistant_id = str(uuid4())
         await runs.publish(
@@ -428,6 +593,7 @@ def create_app(
                 agent=agent,
                 runs=runs,
                 runtime=runtime,
+                rag_store=rag_store,
             )
         )
         run_tasks.add(task)
@@ -486,6 +652,7 @@ async def _execute_run(
     agent: AgentRunner,
     runs: RunManager,
     runtime: RuntimeConfig,
+    rag_store: RagStore,
 ) -> None:
     agui_activity: dict[str, Any] | None = None
 
@@ -540,14 +707,71 @@ async def _execute_run(
             messageId=assistant_id,
             role="assistant",
         )
+        knowledge: dict[str, Any] | None = None
+        rag_trace: ToolTrace | None = None
+        agent_key = conversation.agent.key if conversation.agent else None
+        last_user_message = next(
+            (
+                message
+                for message in reversed(conversation.messages)
+                if message.role == "user"
+            ),
+            None,
+        )
+        if agent_key == "rag-assistant":
+            query = (last_user_message.content if last_user_message else "").strip()
+            if not query and last_user_message and last_user_message.attachments:
+                query = " ".join(
+                    attachment.filename
+                    for attachment in last_user_message.attachments
+                )
+            rag_trace = ToolTrace(
+                id=str(uuid4()),
+                name="search_knowledge_base",
+                input={
+                    "query": query,
+                    "candidate_limit": 24,
+                    "top_k": 5,
+                },
+            )
+            await emit(
+                "tool.started",
+                {"tool": rag_trace.model_dump(mode="json")},
+            )
+            try:
+                knowledge = await rag_store.search(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    query=query,
+                    candidate_limit=24,
+                    top_k=5,
+                )
+                rag_trace.state = "complete"
+                rag_trace.output = {
+                    key: value
+                    for key, value in knowledge.items()
+                    if key != "context"
+                }
+            except Exception as error:
+                rag_trace.state = "error"
+                rag_trace.output = str(error)
+                knowledge = None
+            await emit(
+                "tool.finished",
+                {"tool": rag_trace.model_dump(mode="json")},
+            )
+
         answer, tools = await agent.run(
             conversation.messages,
             emit,
             runtime,
             agent_name=conversation.agent.name if conversation.agent else None,
-            agent_key=conversation.agent.key if conversation.agent else None,
+            agent_key=agent_key,
             agent_prompt=conversation.agent_prompt,
+            knowledge=knowledge,
         )
+        if rag_trace:
+            tools = [rag_trace, *tools]
         pc_build_trace = next(
             (
                 trace
@@ -601,6 +825,29 @@ async def _execute_run(
                 messageId=assistant_id,
                 activityType="media-crawler-task",
                 content=media_crawler_trace.output,
+                replace=True,
+            )
+        if rag_trace and rag_trace.output:
+            rag_content = (
+                rag_trace.output
+                if isinstance(rag_trace.output, dict)
+                else {"query": "", "items": [], "error": rag_trace.output}
+            )
+            agui_activity = {
+                "activityType": "rag-retrieval",
+                "content": rag_content,
+            }
+            await runs.publish(
+                run,
+                "STATE_SNAPSHOT",
+                snapshot={"ragRetrieval": rag_content},
+            )
+            await runs.publish(
+                run,
+                "ACTIVITY_SNAPSHOT",
+                messageId=assistant_id,
+                activityType="rag-retrieval",
+                content=rag_content,
                 replace=True,
             )
         assistant_message = Message(

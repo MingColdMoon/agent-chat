@@ -14,6 +14,7 @@ const username = process.env.DOC_USERNAME || 'demo_alice'
 const password = process.env.DOC_PASSWORD || 'AgentChat123!'
 const profileDir =
   process.env.DOC_PROFILE || join(rootDir, '.edge-docs-profile')
+const ragFixture = join(rootDir, 'docs', 'examples', 'refund-policy.md')
 
 await mkdir(outputDir, { recursive: true })
 
@@ -133,6 +134,23 @@ async function setViewport(width, height) {
     height,
     deviceScaleFactor: 1,
     mobile: width < 600,
+  })
+}
+
+async function setFileInput(selector, filePath) {
+  await send('DOM.enable')
+  const documentNode = await send('DOM.getDocument', {
+    depth: -1,
+    pierce: true,
+  })
+  const input = await send('DOM.querySelector', {
+    nodeId: documentNode.root.nodeId,
+    selector,
+  })
+  if (!input.nodeId) throw new Error(`File input not found: ${selector}`)
+  await send('DOM.setFileInputFiles', {
+    nodeId: input.nodeId,
+    files: [filePath],
   })
 }
 
@@ -361,9 +379,71 @@ await evaluate(`
 await new Promise((resolve) => setTimeout(resolve, 150))
 await capture('media-crawler-task.png')
 
+await evaluate("document.querySelector('.marketplace-link').click()")
+await waitFor("document.querySelector('.marketplace')")
+await waitFor(
+  "[...document.querySelectorAll('.agent-card h3')].some((item) => item.textContent.includes('知识库 RAG'))",
+)
+await evaluate(`
+  (() => {
+    const card = [...document.querySelectorAll('.agent-card')].find(
+      (item) => item.querySelector('h3')?.textContent.includes('知识库 RAG')
+    );
+    card.querySelector('.agent-primary-action').click();
+  })()
+`)
+await waitFor("document.querySelector('.rag-starter')")
+await new Promise((resolve) => setTimeout(resolve, 300))
+await capture('rag-empty.png')
+
+await setFileInput('.composer-file-input', ragFixture)
+await waitFor("document.querySelector('.composer-attachments .attachment-chip')")
+await new Promise((resolve) => setTimeout(resolve, 300))
+await capture('rag-file-ready.png')
+
+await evaluate(`
+  (() => {
+    const textarea = document.querySelector('.composer textarea');
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    ).set;
+    setter.call(textarea, '退款期限是几天？');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.composer').requestSubmit();
+  })()
+`)
+await waitFor("document.querySelector('.rag-retrieval-card')", 25_000)
+await new Promise((resolve) => setTimeout(resolve, 300))
+await evaluate(`
+  (() => {
+    const scroller = document.querySelector('.message-scroller');
+    const card = document.querySelector('.rag-retrieval-card');
+    scroller.scrollTop +=
+      card.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      88;
+  })()
+`)
+await new Promise((resolve) => setTimeout(resolve, 150))
+await capture('rag-retrieval.png')
+
+await waitFor(
+  "document.querySelector('.composer-reference') && !document.querySelector('.composer-reference').disabled",
+  10_000,
+)
+await evaluate("document.querySelector('.composer-reference').click()")
+await waitFor("document.querySelector('.file-reference-item')")
+await evaluate("document.querySelector('.file-reference-item').click()")
+await waitFor("document.querySelector('.composer-attachments .attachment-chip')")
+await new Promise((resolve) => setTimeout(resolve, 200))
+await capture('rag-file-reference.png')
+
 await setViewport(390, 844)
 await navigate()
 await waitFor("document.querySelector('.app-shell')")
+await new Promise((resolve) => setTimeout(resolve, 250))
+await capture('rag-mobile.png')
 await evaluate("document.querySelector('.mobile-menu').click()")
 await waitFor("document.querySelector('.sidebar.open')")
 await evaluate("document.querySelector('.marketplace-link').click()")

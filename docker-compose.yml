@@ -51,8 +51,12 @@ services:
       TAVILY_API_URL: ${TAVILY_API_URL:-https://api.tavily.com}
       MEDIACRAWLER_API_URL: ${MEDIACRAWLER_API_URL:-}
       MEDIACRAWLER_API_TOKEN: ${MEDIACRAWLER_API_TOKEN:-}
+      UPLOAD_DIR: ${UPLOAD_DIR:-data/uploads}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
     ports:
       - "8000:8000"
+    volumes:
+      - uploads_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,4 +88,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:
 

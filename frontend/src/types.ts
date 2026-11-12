@@ -59,6 +59,18 @@ export interface ToolTrace {
   output?: unknown
 }
 
+export interface AttachmentSummary {
+  id: string
+  filename: string
+  content_type: string
+  extension: string
+  size_bytes: number
+  excerpt: string
+  text_length: number
+  referenced: boolean
+  created_at: string
+}
+
 export interface Message {
   id: string
   role: Role
@@ -70,6 +82,7 @@ export interface Message {
   provider?: string
   model?: string
   activity?: AgUiActivity | null
+  attachments: AttachmentSummary[]
 }
 
 export interface AgentSummary {
@@ -114,6 +127,24 @@ export interface PcBuildPlan {
 export interface AgUiActivity {
   activityType: string
   content: Record<string, unknown>
+}
+
+export interface RagRetrievalItem {
+  attachment_id: string
+  filename: string
+  chunk_index: number
+  retrieval_score: number
+  rerank_score: number
+  coverage: number
+  preview: string
+}
+
+export interface RagRetrievalResult {
+  query: string
+  candidate_count: number
+  items: RagRetrievalItem[]
+  rerank: string
+  error?: string
 }
 
 export type MediaCrawlerPlatform =
