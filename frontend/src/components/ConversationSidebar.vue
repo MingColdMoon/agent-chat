@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Bot,
+  Database,
   LogOut,
   PanelLeftClose,
   Plus,
@@ -18,6 +19,8 @@ defineProps<{
   providerLive: boolean
   user: UserInfo | null
   marketplaceActive: boolean
+  knowledgeActive: boolean
+  isAdmin: boolean
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +30,7 @@ const emit = defineEmits<{
   close: []
   logout: []
   marketplace: []
+  knowledge: []
 }>()
 
 function relativeTime(value: string): string {
@@ -79,6 +83,17 @@ function relativeTime(value: string): string {
     >
       <Store :size="17" />
       <span>智能体广场</span>
+    </button>
+
+    <button
+      v-if="isAdmin"
+      class="marketplace-link knowledge-link"
+      :class="{ active: knowledgeActive }"
+      type="button"
+      @click="emit('knowledge')"
+    >
+      <Database :size="17" />
+      <span>知识库管理</span>
     </button>
 
     <div class="list-heading">
@@ -138,7 +153,7 @@ function relativeTime(value: string): string {
       </span>
       <div>
         <strong>{{ user.username }}</strong>
-        <span>已登录</span>
+        <span>{{ user.role === 'admin' ? '管理员' : '已登录' }}</span>
       </div>
       <button
         class="account-logout"

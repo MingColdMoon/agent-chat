@@ -31,8 +31,8 @@ function scoreWidth(score: number) {
         <Database :size="18" />
       </span>
       <div class="rag-card-title">
-        <span>RAG / RETRIEVAL</span>
-        <h3>知识库检索与重排</h3>
+        <span>RAG / PROJECT KNOWLEDGE</span>
+        <h3>项目知识库检索与重排</h3>
       </div>
       <span class="rag-card-badge">
         <Gauge :size="12" />
@@ -66,15 +66,15 @@ function scoreWidth(score: number) {
     <div v-else-if="selectedCount" class="rag-result-list">
       <article
         v-for="item in retrieval.items"
-        :key="`${item.attachment_id}-${item.chunk_index}`"
+        :key="`${item.document_id}-${item.chunk_index}`"
         class="rag-result-item"
       >
         <div class="rag-result-meta">
           <span>
             <FileText :size="13" />
-            {{ item.filename }}
+            {{ item.title || item.filename }}
           </span>
-          <small>片段 {{ item.chunk_index + 1 }}</small>
+          <small>v{{ item.version }} · 片段 {{ item.chunk_index + 1 }}</small>
           <strong>{{ item.rerank_score.toFixed(4) }}</strong>
         </div>
         <p>{{ item.preview }}</p>

@@ -6,7 +6,10 @@ import type {
   Conversation,
   ConversationSummary,
   Health,
+  KnowledgeDocumentListResponse,
+  KnowledgeDocumentSummary,
   MeResponse,
+  RagKnowledgeStatus,
   RunOptions,
   SendMessageResponse,
   StreamEvent,
@@ -73,9 +76,58 @@ export function getHealth(): Promise<Health> {
   return request<Health>('/api/health')
 }
 
+export function getRagStatus(): Promise<RagKnowledgeStatus> {
+  return request<RagKnowledgeStatus>('/api/rag/status')
+}
+
 export async function getAgents(): Promise<AgentSummary[]> {
   const result = await request<{ agents: AgentSummary[] }>('/api/agents')
   return result.agents
+}
+
+export function getAdminKnowledge(): Promise<KnowledgeDocumentListResponse> {
+  return request<KnowledgeDocumentListResponse>('/api/admin/knowledge')
+}
+
+export async function createKnowledgeDocument(
+  title: string,
+  file: File,
+): Promise<KnowledgeDocumentSummary> {
+  const body = new FormData()
+  body.append('title', title)
+  body.append('file', file, file.name)
+  const result = await request<{ document: KnowledgeDocumentSummary }>(
+    '/api/admin/knowledge',
+    {
+      method: 'POST',
+      body,
+    },
+  )
+  return result.document
+}
+
+export async function updateKnowledgeDocument(
+  documentId: string,
+  title: string | null,
+  file: File | null,
+): Promise<KnowledgeDocumentSummary> {
+  const body = new FormData()
+  if (title !== null) body.append('title', title)
+  if (file) body.append('file', file, file.name)
+  const result = await request<{ document: KnowledgeDocumentSummary }>(
+    `/api/admin/knowledge/${documentId}`,
+    {
+      method: 'PUT',
+      body,
+    },
+  )
+  return result.document
+}
+
+export function archiveKnowledgeDocument(documentId: string): Promise<void> {
+  return request<void>(`/api/admin/knowledge/${documentId}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function createAgent(

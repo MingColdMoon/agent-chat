@@ -90,5 +90,6 @@ def user_to_info(user: UserRecord) -> UserInfo:
         id=str(user.id),
         username=user.username,
         created_at=created_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        role="admin" if user.role == "admin" else "user",
     )
 

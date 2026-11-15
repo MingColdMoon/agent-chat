@@ -8,7 +8,7 @@
 
 实现以下闭环：
 
-1. 默认内置“智能客服”“智能自动化报表”“知识库 RAG”“装机大师”和
+1. 默认内置“智能客服”“智能自动化报表”“项目知识库 RAG”“装机大师”和
    “MediaCrawler 采集助手”。
 2. 用户可以查看并使用所有内置智能体。
 3. 用户可以创建自己的智能体。
@@ -78,7 +78,7 @@ REFERENCES agents(id) ON DELETE SET NULL;
 | --- | --- | --- | --- |
 | 智能客服 | `customer-service` | 客户服务 | headset |
 | 智能自动化报表 | `automated-reports` | 数据分析 | chart |
-| 知识库 RAG | `rag-assistant` | 知识库 | database |
+| 项目知识库 RAG | `rag-assistant` | 知识库 | database |
 | 装机大师 | `pc-builder` | 硬件配置 | cpu |
 | MediaCrawler 采集助手 | `media-crawler` | 社交媒体 | radar |
 
@@ -103,8 +103,8 @@ BUILTIN_AGENTS = (
     },
     {
         "slug": "rag-assistant",
-        "name": "知识库 RAG",
-        "instructions": "你是知识库 RAG 助手...",
+        "name": "项目知识库 RAG",
+        "instructions": "你是项目知识库 RAG 助手，读取 rag 目录...",
     },
     {
         "slug": "media-crawler",
@@ -176,7 +176,7 @@ messages = [
 - 智能自动化报表会生成包含摘要、指标、异常和建议的 Markdown 报表模板。
 - 装机大师会生成 AG-UI 可视化装机配置器与硬件活动卡片。
 - MediaCrawler 采集助手会生成结构化采集任务预览或真实任务活动卡片。
-- 知识库 RAG 会展示候选召回、Rerank 分数和文件来源活动卡片。
+- 项目知识库 RAG 会展示候选召回、Rerank 分数和项目文件来源活动卡片。
 - 自定义智能体会显示当前角色名称。
 
 ## 7. Vue 页面
@@ -190,6 +190,7 @@ messages = [
 - 我的智能体区域。
 - 按名称、简介和分类搜索。
 - “全部 / 内置 / 我的”筛选。
+- 管理员在广场同级看到“知识库管理”，普通用户不显示该入口。
 - 开始新会话。
 - 应用到当前会话。
 - 删除自定义智能体。
@@ -214,7 +215,7 @@ messages = [
 
 ```json
 {
-  "Builtins": "智能客服,智能自动化报表,知识库 RAG,装机大师,MediaCrawler 采集助手",
+  "Builtins": "智能客服,智能自动化报表,项目知识库 RAG,装机大师,MediaCrawler 采集助手",
   "Custom": "产品文案助手",
   "ConversationAgent": "智能客服",
   "CustomerReply": true,

@@ -10,13 +10,14 @@ MediaCrawler 数据采集工作台、SSE 流式回答以及 PostgreSQL/Redis 持
 
 ### 智能体广场
 
-- 默认内置 **智能客服**、**智能自动化报表**、**知识库 RAG**、**装机大师**
+- 默认内置 **智能客服**、**智能自动化报表**、**项目知识库 RAG**、**装机大师**
   和 **MediaCrawler 采集助手**。
 - 装机大师使用 AG-UI 活动事件展示可交互装机配置与硬件清单。
 - MediaCrawler 采集助手支持小红书、抖音、快手、B站、微博、贴吧和知乎的
   关键词搜索、内容详情、创作者主页、评论与媒体任务配置。
-- 知识库 RAG 支持上传 PDF、DOCX、文本与代码文件，自动切块，通过 BM25
-  方式召回候选片段，再执行本地覆盖度 Rerank。
+- 项目知识库 RAG 首次启动导入 `rag/` 目录中的 PDF、DOCX、HTML、文本与代码文件，
+  后续由管理员维护版本，通过 BM25 召回候选片段，再执行本地覆盖度 Rerank。
+- 管理员可在“智能体广场”同级入口维护知识文件、标题和版本，普通用户不可访问。
 - 用户可以创建自己的智能体，配置名称、分类、图标、简介和系统指令。
 - 自定义智能体只对创建者可见。
 - 可以开始一个新智能体会话，也可以把智能体应用到当前会话。
@@ -80,13 +81,19 @@ MediaCrawler 数据采集工作台、SSE 流式回答以及 PostgreSQL/Redis 持
 
 ![MediaCrawler 任务结果](docs/images/media-crawler-task.png)
 
-### 文件引用与知识库 RAG
+### 项目知识库 RAG
 
-![上传并引用知识文件](docs/images/rag-file-ready.png)
+![项目知识库](docs/images/rag-empty.png)
 
 ![RAG 召回与 Rerank](docs/images/rag-retrieval.png)
 
-![历史文件再次引用](docs/images/rag-file-reference.png)
+![移动端项目知识库](docs/images/rag-mobile.png)
+
+### 管理员知识库
+
+![知识库管理](docs/images/knowledge-manager.png)
+
+![知识文件版本编辑](docs/images/knowledge-editor.png)
 
 ### 用户登录
 
@@ -161,6 +168,8 @@ docker compose up -d --build
 
 首次打开页面后注册账号即可使用。
 
+Compose 同时启动独立的数据中台，访问 http://localhost:18081。它共用本项目的 PostgreSQL、Redis 和账号，支持读取业务表、导入 CSV/JSON，以及通过数据集对话分析数据。详情见 data-platform/README.md。
+
 ### 4. 查看状态
 
 ```bash
@@ -205,7 +214,7 @@ API Key 只保存在当前标签页的 `sessionStorage`，不会写入 PostgreSQ
 ## 智能体使用
 
 1. 登录后点击侧边栏“智能体广场”。
-2. 选择内置智能体“智能客服”“智能自动化报表”“知识库 RAG”“装机大师”
+2. 选择内置智能体“智能客服”“智能自动化报表”“项目知识库 RAG”“装机大师”
    或“MediaCrawler 采集助手”。
 3. 点击“开始对话”创建新会话，或点击“应用到当前”切换当前会话角色。
 4. 点击“创建智能体”定义自己的角色和系统指令。
@@ -218,19 +227,40 @@ API Key 只保存在当前标签页的 `sessionStorage`，不会写入 PostgreSQ
 用途选择器、硬件清单和兼容性提示。MediaCrawler 通过同样的活动事件渲染任务状态、
 平台、采集数量、评论与导出配置。
 
-## 文件上传与 RAG
+## 文件上传与引用
 
 - 单文件上限 15 MB，每条消息最多引用 5 个文件。
 - 支持文本、Markdown、CSV、JSON、代码、PDF、DOCX，以及图片文件引用。
 - 上传文件按用户和会话隔离，下载接口继续使用 JWT 鉴权。
-- 文本会按约 900 字符切块并保留 120 字符重叠。
+- 普通对话可以把附件绑定到消息，也可以从会话历史文件中再次引用。
+- 未与消息关联的临时附件会在 24 小时后自动清理。
+
+## 项目知识库 RAG
+
+项目根目录的 [`rag/`](rag/) 目录作为首次启动的迁移种子。建立版本化知识库后，
+后续由管理员在“知识库管理”中维护；普通用户进入“项目知识库 RAG”后可以直接提问。
+
+- 支持 HTML、TXT、Markdown、CSV、JSON、代码、PDF 和 DOCX。
+- HTML 会移除脚本、样式与 SVG，仅保留可读正文。
+- 管理员可以上传新知识、修改标题、替换文件生成新版本，或软删除归档。
+- 删除只归档，不物理删除历史版本；过去 RAG 回答中的引用仍可追溯。
+- 全局知识 revision 会随每次变更递增。旧会话继续提问时使用最新有效版本，
+  历史回答保持原样，并在界面提示知识库已更新。
+- 文本按约 900 字符切块，相邻块保留 120 字符重叠。
 - 提问时先使用 BM25 召回最多 24 个候选，再按覆盖度、短语命中、检索分数与
   文件名词权重执行 `lexical-coverage-v1` Rerank，保留最多 5 个片段。
 - RAG 结果通过 AG-UI 活动卡片展示召回数、重排数、来源文件、片段和分数。
-- 未与消息关联的临时附件会在 24 小时后自动清理。
 
-Docker 部署使用 `uploads_data` 卷持久化上传文件；本地开发默认保存到
-`backend/data/uploads`。
+Docker 部署会把项目 `rag/` 以只读方式挂载到 `/app/rag`，仅用于首次导入。
+管理员上传的知识文件保存在 `uploads_data:/app/data/knowledge`。
+
+管理员通过 `ADMIN_USERNAMES` 引导配置，例如：
+
+```env
+ADMIN_USERNAMES=admin,ops-admin
+```
+
+已有同名账号会在后端启动时提升为管理员；新注册的同名账号也会获得管理员角色。
 
 ## MediaCrawler 接入
 
@@ -344,6 +374,12 @@ agent-chat/
 | `POST` | `/api/conversations/{id}/attachments` | 上传文件 |
 | `GET` | `/api/attachments/{id}/download` | 鉴权下载附件 |
 | `DELETE` | `/api/attachments/{id}` | 删除未引用附件 |
+| `GET` | `/api/rag/status` | 项目知识库索引状态 |
+| `GET` | `/api/admin/knowledge` | 管理员知识文件列表 |
+| `POST` | `/api/admin/knowledge` | 管理员添加知识文件 |
+| `PUT` | `/api/admin/knowledge/{id}` | 修改标题或替换新版本 |
+| `DELETE` | `/api/admin/knowledge/{id}` | 归档知识文件 |
+| `GET` | `/api/admin/knowledge/{id}/versions` | 查看历史版本 |
 | `POST` | `/api/conversations/{id}/messages` | 启动一轮问答 |
 | `GET` | `/api/runs/{id}/events` | SSE 事件流 |
 
@@ -352,6 +388,7 @@ agent-chat/
 - `.env`、数据库数据、虚拟环境、`node_modules`、构建产物和本地日志均被忽略。
 - 认证使用 JWT Bearer Header，不依赖认证 Cookie。
 - JWT 登出后会在 Redis 中记录到原过期时间。
+- 知识库管理接口会在后端校验 `admin` 角色，普通用户无法仅靠隐藏入口绕过权限。
 - 用户自定义智能体带所有者约束，其他用户无法读取或应用。
 - 附件同时校验用户、会话和消息引用关系，不能跨用户下载。
 - 会话查询始终同时限制会话 ID 和用户 ID。
@@ -363,6 +400,7 @@ agent-chat/
 - [装机大师与 AG-UI 实现说明](docs/agui-pc-builder.md)
 - [MediaCrawler 内置智能体说明](docs/media-crawler-agent.md)
 - [文件引用与 RAG Rerank 说明](docs/file-rag.md)
+- [知识库管理与历史会话方案](docs/knowledge-base-management.md)
 - [LeiBox 风格界面说明](docs/leibox-ui.md)
 - [JWT 登录、PostgreSQL 与 Redis 实现说明](docs/auth-redis-postgresql.md)
 

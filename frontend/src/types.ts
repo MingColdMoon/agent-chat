@@ -2,11 +2,13 @@ export type Role = 'user' | 'assistant'
 export type ProviderId = 'demo' | 'openai' | 'deepseek' | 'custom'
 export type ApiProviderId = Exclude<ProviderId, 'demo'>
 export type AuthMode = 'login' | 'register'
+export type UserRole = 'user' | 'admin'
 
 export interface UserInfo {
   id: string
   username: string
   created_at: string
+  role: UserRole
 }
 
 export interface AuthResponse {
@@ -130,8 +132,11 @@ export interface AgUiActivity {
 }
 
 export interface RagRetrievalItem {
-  attachment_id: string
+  document_id: string
+  title: string
   filename: string
+  version: number
+  content_hash: string
   chunk_index: number
   retrieval_score: number
   rerank_score: number
@@ -144,7 +149,48 @@ export interface RagRetrievalResult {
   candidate_count: number
   items: RagRetrievalItem[]
   rerank: string
+  revision: number
+  knowledge_available?: boolean
   error?: string
+}
+
+export interface RagSourceSummary {
+  id: string
+  title: string
+  filename: string
+  version: number
+  chunk_count: number
+  size_bytes: number
+}
+
+export interface RagKnowledgeStatus {
+  available: boolean
+  root: string
+  source_count: number
+  chunk_count: number
+  revision: number
+  indexed_at: string | null
+  sources: RagSourceSummary[]
+}
+
+export interface KnowledgeDocumentSummary {
+  id: string
+  title: string
+  filename: string
+  content_type: string
+  extension: string
+  status: 'active' | 'archived'
+  current_version: number
+  chunk_count: number
+  size_bytes: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeDocumentListResponse {
+  revision: number
+  documents: KnowledgeDocumentSummary[]
 }
 
 export type MediaCrawlerPlatform =

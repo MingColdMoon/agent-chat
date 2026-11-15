@@ -1210,6 +1210,10 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
+.knowledge-link {
+  margin-top: -10px;
+}
+
 .composer-area {
   padding: 10px 22px 13px;
   background: var(--surface);
@@ -3709,6 +3713,70 @@ textarea {
   font-size: 8px;
 }
 
+.rag-source-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rag-source-list button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #121214;
+  color: var(--ink-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.rag-source-list button:hover {
+  border-color: #5d5d65;
+  background: #17171a;
+  color: var(--ink);
+}
+
+.rag-source-list button span,
+.rag-source-list button strong,
+.rag-source-list button small {
+  display: block;
+  min-width: 0;
+}
+
+.rag-source-list button strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-source-list button small {
+  margin-top: 3px;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 7px;
+}
+
+.rag-source-list button > svg {
+  color: var(--warm);
+  transform: rotate(45deg);
+}
+
+.rag-source-empty {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
 .rag-starter-flow {
   display: flex;
   flex-wrap: wrap;
@@ -3973,6 +4041,27 @@ textarea {
 
 .main-panel.marketplace-mode {
   background: #050506;
+}
+
+.main-panel.knowledge-mode {
+  display: block;
+  overflow-y: auto;
+  background: #050506;
+}
+
+.knowledge-revision-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-bottom: 1px solid #3f432d;
+  background: #171a11;
+  color: #d8e8a4;
+  font-size: 9px;
+}
+
+.knowledge-revision-notice svg {
+  flex: 0 0 auto;
 }
 
 .marketplace {
@@ -4825,6 +4914,10 @@ textarea {
   gap: 8px;
 }
 
+.composer-entry.no-tools {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .composer-tools {
   display: flex;
   align-items: center;
@@ -5277,5 +5370,10 @@ textarea {
   .rag-pipeline > svg {
     transform: rotate(-90deg);
   }
+
+  .rag-source-list {
+    grid-template-columns: 1fr;
+  }
 }
 
+@media(max-width:620px){.data-toolbar{flex-wrap:wrap}.row-search{flex:1;min-width:140px}.page-size{margin-left:0}.row-pagination{align-items:flex-start;flex-direction:column}.row-editor-fields{grid-template-columns:1fr}.analysis-actions{flex-wrap:wrap}.analysis-titlebar{align-items:flex-start}}

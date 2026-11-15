@@ -15,6 +15,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -45,6 +46,11 @@ class UserRecord(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(
+        String(16),
+        default="user",
+        server_default="user",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now_datetime,
@@ -231,6 +237,171 @@ class RagChunkRecord(Base):
     )
 
 
+class ProjectRagDocumentRecord(Base):
+    __tablename__ = "rag_documents"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    source_path: Mapped[str] = mapped_column(
+        String(500),
+        unique=True,
+        index=True,
+    )
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(120))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    indexed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+    )
+    file_modified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+    )
+
+
+class ProjectRagChunkRecord(Base):
+    __tablename__ = "rag_project_chunks"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("rag_documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    source_path: Mapped[str] = mapped_column(String(500))
+    filename: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+        index=True,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_rag_project_chunks_document_chunk",
+            "document_id",
+            "chunk_index",
+        ),
+    )
+
+
+class KnowledgeDocumentRecord(Base):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    title: Mapped[str] = mapped_column(String(200))
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(120))
+    extension: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+        index=True,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
+class KnowledgeVersionRecord(Base):
+    __tablename__ = "knowledge_versions"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(120))
+    extension: Mapped[str] = mapped_column(String(32), default="")
+    content_hash: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    storage_path: Mapped[str] = mapped_column(Text)
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "version",
+            name="uq_knowledge_document_version",
+        ),
+    )
+
+
+class KnowledgeChunkRecord(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    version_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("knowledge_versions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    source_title: Mapped[str] = mapped_column(String(200))
+    source_filename: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_knowledge_chunks_version_chunk",
+            "version_id",
+            "chunk_index",
+        ),
+    )
+
+
+class KnowledgeStateRecord(Base):
+    __tablename__ = "knowledge_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    bootstrap_completed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now_datetime,
+    )
+
+
 class Database:
     def __init__(self, database_url: str) -> None:
         self.engine: AsyncEngine = create_async_engine(
@@ -266,6 +437,30 @@ class Database:
                         "ADD COLUMN IF NOT EXISTS agui_activity JSONB"
                     )
                 )
+                await connection.execute(
+                    text(
+                        "ALTER TABLE users "
+                        "ADD COLUMN IF NOT EXISTS role VARCHAR(16) "
+                        "NOT NULL DEFAULT 'user'"
+                    )
+                )
+            elif connection.dialect.name == "sqlite":
+                columns = {
+                    row[1]
+                    for row in (
+                        await connection.execute(
+                            text("PRAGMA table_info(users)")
+                        )
+                    ).all()
+                }
+                if "role" not in columns:
+                    await connection.execute(
+                        text(
+                            "ALTER TABLE users "
+                            "ADD COLUMN role VARCHAR(16) "
+                            "NOT NULL DEFAULT 'user'"
+                        )
+                    )
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:

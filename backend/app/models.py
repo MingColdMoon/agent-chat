@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 Role = Literal["user", "assistant"]
+UserRole = Literal["user", "admin"]
 ProviderId = Literal["demo", "openai", "deepseek", "custom"]
 
 
@@ -140,6 +141,63 @@ class AttachmentListResponse(BaseModel):
     attachments: list[AttachmentSummary]
 
 
+class RagSourceSummary(BaseModel):
+    id: str
+    title: str
+    filename: str
+    version: int
+    chunk_count: int
+    size_bytes: int
+
+
+class RagStatusResponse(BaseModel):
+    available: bool
+    root: str
+    source_count: int
+    chunk_count: int
+    revision: int = 0
+    indexed_at: str | None = None
+    sources: list[RagSourceSummary] = Field(default_factory=list)
+
+
+class KnowledgeDocumentSummary(BaseModel):
+    id: str
+    title: str
+    filename: str
+    content_type: str
+    extension: str
+    status: Literal["active", "archived"]
+    current_version: int
+    chunk_count: int
+    size_bytes: int
+    created_by: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    revision: int
+    documents: list[KnowledgeDocumentSummary]
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    document: KnowledgeDocumentSummary
+
+
+class KnowledgeVersionSummary(BaseModel):
+    id: str
+    version: int
+    filename: str
+    size_bytes: int
+    content_hash: str
+    created_by: str | None = None
+    created_at: str
+
+
+class KnowledgeVersionListResponse(BaseModel):
+    versions: list[KnowledgeVersionSummary]
+
+
 class HealthResponse(BaseModel):
     ok: bool
     mode: Literal["demo", "live"]
@@ -173,6 +231,7 @@ class UserInfo(BaseModel):
     id: str
     username: str
     created_at: str
+    role: UserRole = "user"
 
 
 class AuthResponse(BaseModel):

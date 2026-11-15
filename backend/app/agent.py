@@ -153,8 +153,8 @@ def _format_rag_demo_answer(knowledge: dict[str, Any]) -> str:
         return (
             "## 知识库暂无可检索内容\n\n"
             f"问题：**{query}**\n\n"
-            "请在输入框上传 PDF、DOCX 或文本文件后重试。"
-            "文件上传后会自动切块，并在每次提问时执行候选召回与 Rerank。"
+            "请检查项目 `rag` 目录是否存在受支持的 PDF、DOCX、HTML 或文本文件，"
+            "并确认后端启动日志已完成项目知识库索引。"
         )
     sources = list(
         dict.fromkeys(str(item.get("filename") or "未知文件") for item in items)

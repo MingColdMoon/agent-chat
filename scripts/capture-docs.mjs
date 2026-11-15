@@ -14,7 +14,6 @@ const username = process.env.DOC_USERNAME || 'demo_alice'
 const password = process.env.DOC_PASSWORD || 'AgentChat123!'
 const profileDir =
   process.env.DOC_PROFILE || join(rootDir, '.edge-docs-profile')
-const ragFixture = join(rootDir, 'docs', 'examples', 'refund-policy.md')
 
 await mkdir(outputDir, { recursive: true })
 
@@ -258,6 +257,27 @@ await waitFor("document.querySelector('.marketplace')")
 await new Promise((resolve) => setTimeout(resolve, 300))
 await capture('marketplace.png')
 
+if (await evaluate("Boolean(document.querySelector('.knowledge-link'))")) {
+  await evaluate("document.querySelector('.knowledge-link').click()")
+  await waitFor("document.querySelector('.knowledge-manager')")
+  await new Promise((resolve) => setTimeout(resolve, 350))
+  await capture('knowledge-manager.png')
+  await evaluate("document.querySelector('.knowledge-actions button').click()")
+  await waitFor("document.querySelector('.knowledge-editor')")
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await capture('knowledge-editor.png')
+  await evaluate(`
+    document.querySelector('.knowledge-editor header .icon-button').click()
+  `)
+  await waitFor("!document.querySelector('.knowledge-editor')")
+  await evaluate(`
+    document.querySelector('.knowledge-header .icon-button').click()
+  `)
+  await waitFor("document.querySelector('.main-panel')")
+  await evaluate("document.querySelector('.marketplace-link').click()")
+  await waitFor("document.querySelector('.marketplace')")
+}
+
 await evaluate(`
   (() => {
     const input = document.querySelector('.marketplace-search input');
@@ -396,11 +416,6 @@ await waitFor("document.querySelector('.rag-starter')")
 await new Promise((resolve) => setTimeout(resolve, 300))
 await capture('rag-empty.png')
 
-await setFileInput('.composer-file-input', ragFixture)
-await waitFor("document.querySelector('.composer-attachments .attachment-chip')")
-await new Promise((resolve) => setTimeout(resolve, 300))
-await capture('rag-file-ready.png')
-
 await evaluate(`
   (() => {
     const textarea = document.querySelector('.composer textarea');
@@ -408,7 +423,7 @@ await evaluate(`
       HTMLTextAreaElement.prototype,
       'value'
     ).set;
-    setter.call(textarea, '退款期限是几天？');
+    setter.call(textarea, 'B站直播规范中禁止传播哪些内容？');
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('.composer').requestSubmit();
   })()
@@ -428,21 +443,55 @@ await evaluate(`
 await new Promise((resolve) => setTimeout(resolve, 150))
 await capture('rag-retrieval.png')
 
-await waitFor(
-  "document.querySelector('.composer-reference') && !document.querySelector('.composer-reference').disabled",
-  10_000,
-)
-await evaluate("document.querySelector('.composer-reference').click()")
-await waitFor("document.querySelector('.file-reference-item')")
-await evaluate("document.querySelector('.file-reference-item').click()")
-await waitFor("document.querySelector('.composer-attachments .attachment-chip')")
+await evaluate(`
+  (async () => {
+    const token = sessionStorage.getItem('agent-chat-access-token');
+    const headers = { Authorization: 'Bearer ' + token };
+    const listing = await fetch('/api/admin/knowledge', { headers }).then(
+      (response) => response.json(),
+    );
+    const document = listing.documents.find(
+      (item) => item.filename === 'bilibili直播规范.html',
+    );
+    if (!document) throw new Error('Knowledge document not found');
+    const body = new FormData();
+    body.append('title', document.title);
+    body.append(
+      'file',
+      new File(
+        [
+          '<html><body><h1>直播规范</h1>',
+          '<p>禁止传播虚假新闻，违规内容需要下架审核。</p>',
+          '</body></html>',
+        ],
+        document.filename,
+        { type: 'text/html' },
+      ),
+    );
+    const updated = await fetch('/api/admin/knowledge/' + document.id, {
+      method: 'PUT',
+      headers,
+      body,
+    });
+    if (!updated.ok) throw new Error(await updated.text());
+    return true;
+  })()
+`)
+await navigate()
+await waitFor("document.querySelector('.knowledge-revision-notice')")
 await new Promise((resolve) => setTimeout(resolve, 200))
-await capture('rag-file-reference.png')
+await capture('knowledge-revision-notice.png')
 
 await setViewport(390, 844)
 await navigate()
 await waitFor("document.querySelector('.app-shell')")
 await new Promise((resolve) => setTimeout(resolve, 250))
+await evaluate(`
+  (() => {
+    const scroller = document.querySelector('.message-scroller');
+    if (scroller) scroller.scrollTop = 0;
+  })()
+`)
 await capture('rag-mobile.png')
 await evaluate("document.querySelector('.mobile-menu').click()")
 await waitFor("document.querySelector('.sidebar.open')")

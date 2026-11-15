@@ -11,6 +11,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
@@ -34,6 +35,8 @@ from app.config import (
     Settings,
     application_home,
     get_settings,
+    resolve_knowledge_dir,
+    resolve_project_rag_dir,
     resolve_runtime_config,
 )
 from app.database import Database
@@ -43,6 +46,7 @@ from app.files import (
     AttachmentStore,
     attachment_to_summary,
 )
+from app.knowledge import KnowledgeError, KnowledgeStore
 from app.models import (
     AgentCreateRequest,
     AgentListResponse,
@@ -57,15 +61,18 @@ from app.models import (
     CreateConversationRequest,
     CreateConversationResponse,
     HealthResponse,
+    KnowledgeDocumentListResponse,
+    KnowledgeDocumentResponse,
+    KnowledgeVersionListResponse,
     MeResponse,
     Message,
+    RagStatusResponse,
     RuntimeConfig,
     SendMessageRequest,
     SendMessageResponse,
     ToolTrace,
     UserInfo,
 )
-from app.rag import RagStore
 from app.sessions import RedisSessionStore, SessionStore
 from app.storage import (
     AgentStore,
@@ -95,7 +102,14 @@ def create_app(
         upload_root,
         settings.max_upload_bytes,
     )
-    rag_store = RagStore(database.session_factory)
+    project_rag_root = resolve_project_rag_dir(settings)
+    knowledge_root = resolve_knowledge_dir(settings)
+    knowledge_store = KnowledgeStore(
+        database.session_factory,
+        knowledge_root,
+        project_rag_root,
+        settings.max_upload_bytes,
+    )
     runs = RunManager()
     agent = AgentRunner(settings)
     run_tasks: set[asyncio.Task[None]] = set()
@@ -104,8 +118,11 @@ def create_app(
     async def lifespan(_: FastAPI):
         await database.initialize()
         upload_root.mkdir(parents=True, exist_ok=True)
+        knowledge_root.mkdir(parents=True, exist_ok=True)
         await attachment_store.cleanup_stale_unbound()
+        await user_store.sync_admin_roles(settings.admin_username_set)
         await agent_store.seed_builtins()
+        await knowledge_store.bootstrap_from_directory()
         await session_store.initialize()
         try:
             yield
@@ -178,6 +195,16 @@ def create_app(
     CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
     CurrentAuth = Annotated[AuthContext, Depends(get_auth_context)]
 
+    async def get_admin_user(user: CurrentUser) -> UserInfo:
+        if user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="需要管理员权限",
+            )
+        return user
+
+    AdminUser = Annotated[UserInfo, Depends(get_admin_user)]
+
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         tools = [
@@ -219,6 +246,11 @@ def create_app(
             user = await user_store.create(
                 payload.username,
                 await hash_password(payload.password),
+                role=(
+                    "admin"
+                    if payload.username in settings.admin_username_set
+                    else "user"
+                ),
             )
         except DuplicateUsernameError as error:
             raise HTTPException(
@@ -406,6 +438,136 @@ def create_app(
             )
         )
 
+    @app.get("/api/rag/status", response_model=RagStatusResponse)
+    async def rag_status(_user: CurrentUser) -> RagStatusResponse:
+        return RagStatusResponse(**await knowledge_store.status())
+
+    @app.get(
+        "/api/admin/knowledge",
+        response_model=KnowledgeDocumentListResponse,
+    )
+    async def admin_list_knowledge(
+        _admin: AdminUser,
+        include_archived: bool = True,
+    ) -> KnowledgeDocumentListResponse:
+        return KnowledgeDocumentListResponse(
+            **await knowledge_store.list_documents(
+                include_archived=include_archived,
+            )
+        )
+
+    @app.post(
+        "/api/admin/knowledge",
+        response_model=KnowledgeDocumentResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def admin_create_knowledge(
+        admin: AdminUser,
+        file: UploadFile = File(...),
+        title: str = Form(default=""),
+    ) -> KnowledgeDocumentResponse:
+        data = await file.read(settings.max_upload_bytes + 1)
+        try:
+            document = await knowledge_store.create_document(
+                title=title,
+                filename=file.filename or "未命名知识文件",
+                data=data,
+                created_by=admin.id,
+            )
+        except KnowledgeError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        finally:
+            await file.close()
+        return KnowledgeDocumentResponse(document=document)
+
+    @app.put(
+        "/api/admin/knowledge/{document_id}",
+        response_model=KnowledgeDocumentResponse,
+    )
+    async def admin_update_knowledge(
+        document_id: str,
+        admin: AdminUser,
+        title: str | None = Form(default=None),
+        file: UploadFile | None = File(default=None),
+    ) -> KnowledgeDocumentResponse:
+        if (title is None or not title.strip()) and file is None:
+            raise HTTPException(
+                status_code=400,
+                detail="至少需要修改标题或上传新版本文件",
+            )
+        data = (
+            await file.read(settings.max_upload_bytes + 1)
+            if file is not None
+            else None
+        )
+        try:
+            document = await knowledge_store.update_document(
+                document_id,
+                title=title,
+                filename=file.filename if file else None,
+                data=data,
+                updated_by=admin.id,
+            )
+        except KnowledgeError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        finally:
+            if file is not None:
+                await file.close()
+        return KnowledgeDocumentResponse(document=document)
+
+    @app.delete(
+        "/api/admin/knowledge/{document_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def admin_archive_knowledge(
+        document_id: str,
+        _admin: AdminUser,
+    ) -> None:
+        try:
+            await knowledge_store.archive_document(document_id)
+        except KnowledgeError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.get(
+        "/api/admin/knowledge/{document_id}/versions",
+        response_model=KnowledgeVersionListResponse,
+    )
+    async def admin_list_knowledge_versions(
+        document_id: str,
+        _admin: AdminUser,
+    ) -> KnowledgeVersionListResponse:
+        try:
+            versions = await knowledge_store.list_versions(document_id)
+        except KnowledgeError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return KnowledgeVersionListResponse(versions=versions)
+
+    @app.get(
+        "/api/admin/knowledge/{document_id}/versions/{version_number}/download"
+    )
+    async def admin_download_knowledge_version(
+        document_id: str,
+        version_number: int,
+        _admin: AdminUser,
+    ):
+        try:
+            version = await knowledge_store.version_file(
+                document_id,
+                version_number,
+            )
+        except KnowledgeError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if version is None:
+            raise HTTPException(status_code=404, detail="知识版本不存在")
+        path = Path(version.storage_path)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="知识文件已丢失")
+        return FileResponse(
+            path=path,
+            filename=version.filename,
+            media_type=version.content_type,
+        )
+
     @app.post(
         "/api/conversations/{conversation_id}/attachments",
         response_model=AttachmentResponse,
@@ -431,13 +593,6 @@ def create_app(
                 file.filename or "未命名文件",
                 file.content_type or "application/octet-stream",
                 data,
-            )
-            await rag_store.index_attachment(
-                attachment_id=attachment.id,
-                user_id=user.id,
-                conversation_id=conversation_id,
-                filename=attachment.filename,
-                text=attachment.extracted_text,
             )
         except AttachmentError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -593,7 +748,7 @@ def create_app(
                 agent=agent,
                 runs=runs,
                 runtime=runtime,
-                rag_store=rag_store,
+                knowledge_store=knowledge_store,
             )
         )
         run_tasks.add(task)
@@ -652,7 +807,7 @@ async def _execute_run(
     agent: AgentRunner,
     runs: RunManager,
     runtime: RuntimeConfig,
-    rag_store: RagStore,
+    knowledge_store: KnowledgeStore,
 ) -> None:
     agui_activity: dict[str, Any] | None = None
 
@@ -739,9 +894,7 @@ async def _execute_run(
                 {"tool": rag_trace.model_dump(mode="json")},
             )
             try:
-                knowledge = await rag_store.search(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
+                knowledge = await knowledge_store.search(
                     query=query,
                     candidate_limit=24,
                     top_k=5,

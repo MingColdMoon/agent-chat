@@ -67,12 +67,15 @@ class Settings(BaseSettings):
     media_crawler_api_url: str | None = None
     media_crawler_api_token: str | None = None
     upload_dir: str = "data/uploads"
+    knowledge_dir: str = "data/knowledge"
+    project_rag_dir: str = "rag"
     max_upload_bytes: int = Field(
         default=15 * 1024 * 1024,
         ge=1024,
         le=50 * 1024 * 1024,
     )
     max_attachments_per_message: int = Field(default=5, ge=1, le=10)
+    admin_usernames: str = "admin"
     database_url: str = (
         "postgresql+asyncpg://agent:agent@127.0.0.1:5433/agent_chat"
     )
@@ -125,10 +128,40 @@ class Settings(BaseSettings):
             and self.media_crawler_api_url.strip()
         )
 
+    @property
+    def admin_username_set(self) -> set[str]:
+        return {
+            username.strip().lower()
+            for username in self.admin_usernames.split(",")
+            if username.strip()
+        }
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def resolve_project_rag_dir(settings: Settings) -> Path:
+    configured = Path(settings.project_rag_dir)
+    if configured.is_absolute():
+        return configured
+    candidates = (
+        BACKEND_DIR.parent / configured,
+        BACKEND_DIR / configured,
+        application_home() / configured,
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def resolve_knowledge_dir(settings: Settings) -> Path:
+    configured = Path(settings.knowledge_dir)
+    if configured.is_absolute():
+        return configured
+    return application_home() / configured
 
 
 def resolve_runtime_config(

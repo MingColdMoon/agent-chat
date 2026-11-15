@@ -16,12 +16,14 @@ import {
   MessageSquareText,
   Paperclip,
   Plus,
+  RefreshCw,
   SlidersHorizontal,
   Sparkles,
   Store,
   X,
 } from 'lucide-vue-next'
 import AgentMarketplace from './components/AgentMarketplace.vue'
+import AdminKnowledgeManager from './components/AdminKnowledgeManager.vue'
 import AttachmentChip from './components/AttachmentChip.vue'
 import AuthScreen from './components/AuthScreen.vue'
 import ChatMessage from './components/ChatMessage.vue'
@@ -43,6 +45,7 @@ import {
   getConversations,
   getConversationAttachments,
   getHealth,
+  getRagStatus,
   getAgents,
   login,
   logout,
@@ -59,6 +62,7 @@ import type {
   Health,
   Message,
   ProviderId,
+  RagKnowledgeStatus,
   RunOptions,
   RuntimeSettings,
   StreamEvent,
@@ -136,10 +140,12 @@ const pageError = ref('')
 const sidebarOpen = ref(false)
 const settingsOpen = ref(false)
 const marketplaceOpen = ref(false)
+const knowledgeOpen = ref(false)
 const agentCreateOpen = ref(false)
 const agentsLoading = ref(false)
 const agentMutationBusy = ref(false)
 const agentError = ref('')
+const ragStatus = ref<RagKnowledgeStatus | null>(null)
 const pendingAttachments = ref<AttachmentSummary[]>([])
 const conversationAttachments = ref<AttachmentSummary[]>([])
 const uploadBusy = ref(false)
@@ -216,10 +222,33 @@ const referenceableAttachments = computed(() =>
       !pendingAttachments.value.some((item) => item.id === attachment.id),
   ),
 )
+const ragSources = computed(() => ragStatus.value?.sources || [])
 const currentSummary = computed(() =>
   conversations.value.find((item) => item.id === currentId.value),
 )
 const currentAgent = computed(() => currentSummary.value?.agent || null)
+const ragRevisionNotice = computed(() => {
+  if (currentAgent.value?.key !== 'rag-assistant' || !ragStatus.value) {
+    return null
+  }
+  for (const message of [...messages.value].reverse()) {
+    if (message.activity?.activityType !== 'rag-retrieval') continue
+    const revision = Number(message.activity.content.revision || 0)
+    if (revision > 0 && ragStatus.value.revision > revision) {
+      return {
+        previous: revision,
+        current: ragStatus.value.revision,
+      }
+    }
+    break
+  }
+  return null
+})
+const composerPlaceholder = computed(() =>
+  currentAgent.value?.key === 'rag-assistant'
+    ? '直接提问项目知识库'
+    : '给 Agent 发送消息，或拖入文件',
+)
 const headerMeta = computed(() =>
   messages.value.length > 0 ? `${messages.value.length} 条消息` : '新会话',
 )
@@ -393,12 +422,15 @@ function updateScrollStickiness() {
 }
 
 async function loadWorkspace() {
-  const [healthResult, conversationList, agentList] = await Promise.all([
-    getHealth(),
-    getConversations(),
-    getAgents(),
-  ])
+  const [healthResult, conversationList, agentList, ragStatusResult] =
+    await Promise.all([
+      getHealth(),
+      getConversations(),
+      getAgents(),
+      getRagStatus().catch(() => null),
+    ])
   health.value = healthResult
+  ragStatus.value = ragStatusResult
   const hadSavedSettings = window.sessionStorage.getItem(
     SETTINGS_STORAGE_KEY,
   )
@@ -474,7 +506,9 @@ async function handleLogout() {
     sidebarOpen.value = false
     settingsOpen.value = false
     marketplaceOpen.value = false
+    knowledgeOpen.value = false
     agentCreateOpen.value = false
+    ragStatus.value = null
     window.sessionStorage.removeItem(SETTINGS_STORAGE_KEY)
     Object.assign(runtimeSettings, createRuntimeSettings())
   }
@@ -506,9 +540,10 @@ async function selectConversation(id: string) {
     return
   }
   try {
-    const [conversation, attachments] = await Promise.all([
+    const [conversation, attachments, currentRagStatus] = await Promise.all([
       getConversation(id),
       getConversationAttachments(id),
+      getRagStatus().catch(() => null),
     ])
     abortActiveStream()
     discardPendingFiles()
@@ -516,8 +551,10 @@ async function selectConversation(id: string) {
     currentTitle.value = conversation.title
     messages.value = conversation.messages
     conversationAttachments.value = attachments
+    if (currentRagStatus) ragStatus.value = currentRagStatus
     referenceOpen.value = false
     marketplaceOpen.value = false
+    knowledgeOpen.value = false
     stickToBottom.value = true
     pageError.value = ''
     sidebarOpen.value = false
@@ -553,10 +590,34 @@ async function refreshAgents() {
 function openMarketplace() {
   if (busy.value || uploadBusy.value) return
   marketplaceOpen.value = true
+  knowledgeOpen.value = false
   settingsOpen.value = false
   sidebarOpen.value = false
   agentError.value = ''
   void refreshAgents()
+}
+
+async function refreshRagStatus() {
+  try {
+    ragStatus.value = await getRagStatus()
+  } catch {
+    // Keep the previous status; the management page reports its own errors.
+  }
+}
+
+function openKnowledgeManager() {
+  if (
+    user.value?.role !== 'admin' ||
+    busy.value ||
+    uploadBusy.value
+  ) {
+    return
+  }
+  knowledgeOpen.value = true
+  marketplaceOpen.value = false
+  settingsOpen.value = false
+  sidebarOpen.value = false
+  pageError.value = ''
 }
 
 function openAgentCreator() {
@@ -610,6 +671,10 @@ async function applyAgentToCurrent(agent: AgentSummary) {
   agentMutationBusy.value = true
   agentError.value = ''
   try {
+    if (agent.key === 'rag-assistant') {
+      discardPendingFiles()
+      referenceOpen.value = false
+    }
     const conversation = await applyAgent(currentId.value, agent.id)
     messages.value = conversation.messages
     currentTitle.value = conversation.title
@@ -661,6 +726,7 @@ function startNewChat() {
   referenceOpen.value = false
   draggingFiles.value = false
   marketplaceOpen.value = false
+  knowledgeOpen.value = false
   stickToBottom.value = true
   pageError.value = ''
   sidebarOpen.value = false
@@ -842,9 +908,13 @@ async function refreshCurrentConversation() {
   try {
     await loadConversationList()
     if (!currentId.value) return
-    const conversation = await getConversation(currentId.value)
+    const [conversation, currentRagStatus] = await Promise.all([
+      getConversation(currentId.value),
+      getRagStatus().catch(() => null),
+    ])
     messages.value = conversation.messages
     currentTitle.value = conversation.title
+    if (currentRagStatus) ragStatus.value = currentRagStatus
     await loadConversationAttachments(currentId.value)
     scrollToBottom()
   } catch (error) {
@@ -878,6 +948,10 @@ function referenceAttachment(attachment: AttachmentSummary) {
 }
 
 async function uploadFiles(files: File[]) {
+  if (currentAgent.value?.key === 'rag-assistant') {
+    pageError.value = '项目知识库 RAG 直接读取 rag 目录，无需上传附件'
+    return
+  }
   if (!files.length || busy.value || uploadBusy.value) return
   const available = 5 - pendingAttachments.value.length
   if (available <= 0) {
@@ -1107,12 +1181,15 @@ onBeforeUnmount(() => {
       :provider-live="providerLive"
       :user="user"
       :marketplace-active="marketplaceOpen"
+      :knowledge-active="knowledgeOpen"
+      :is-admin="user.role === 'admin'"
       @new-chat="startNewChat"
       @select="selectConversation"
       @remove="removeConversation"
       @close="sidebarOpen = false"
       @logout="handleLogout"
       @marketplace="openMarketplace"
+      @knowledge="openKnowledgeManager"
     />
 
     <button
@@ -1125,10 +1202,18 @@ onBeforeUnmount(() => {
 
     <main
       class="main-panel"
-      :class="{ 'marketplace-mode': marketplaceOpen }"
+      :class="{
+        'marketplace-mode': marketplaceOpen,
+        'knowledge-mode': knowledgeOpen,
+      }"
     >
+      <AdminKnowledgeManager
+        v-if="knowledgeOpen"
+        @back="knowledgeOpen = false"
+        @changed="refreshRagStatus"
+      />
       <AgentMarketplace
-        v-if="marketplaceOpen"
+        v-else-if="marketplaceOpen"
         :agents="agents"
         :loading="agentsLoading"
         :mutation-busy="agentMutationBusy"
@@ -1218,6 +1303,14 @@ onBeforeUnmount(() => {
             <X :size="16" />
           </button>
         </div>
+
+        <div v-if="ragRevisionNotice" class="knowledge-revision-notice">
+          <RefreshCw :size="15" />
+          <span>
+            知识库已从 r{{ ragRevisionNotice.previous }} 更新到
+            r{{ ragRevisionNotice.current }}。历史回答保持原样，继续提问将使用最新知识。
+          </span>
+        </div>
         </div>
 
         <section
@@ -1237,7 +1330,7 @@ onBeforeUnmount(() => {
                 : currentAgent?.key === 'media-crawler'
                   ? '配置一次公开数据采集'
                   : currentAgent?.key === 'rag-assistant'
-                    ? '向你的文件提问'
+                    ? '直接问项目知识库'
                 : '今天想了解什么？'
             }}
           </h2>
@@ -1256,29 +1349,40 @@ onBeforeUnmount(() => {
             class="rag-starter"
           >
             <div class="rag-starter-head">
-              <span>RAG PIPELINE</span>
+              <span>PROJECT KNOWLEDGE</span>
               <strong>
                 {{
-                  conversationAttachments.length
-                    ? `${conversationAttachments.length} 个知识文件`
-                    : '尚无知识文件'
+                  ragStatus?.available
+                    ? `${ragStatus.source_count} 个文件 · ${ragStatus.chunk_count} 个片段`
+                    : '知识目录未就绪'
                 }}
               </strong>
             </div>
-            <div class="rag-starter-flow">
+            <div v-if="ragSources.length" class="rag-source-list">
               <button
+                v-for="source in ragSources.slice(0, 4)"
+                :key="source.id"
                 type="button"
-                :disabled="busy || uploadBusy"
-                @click="openFilePicker"
+                @click="
+                  useSuggestion(
+                    `请基于项目知识库，总结《${source.title}》的核心内容。`,
+                  )
+                "
               >
-                <LoaderCircle
-                  v-if="uploadBusy"
-                  class="spin"
-                  :size="16"
-                />
-                <Paperclip v-else :size="16" />
-                添加知识文件
+                <span>
+                  <strong>{{ source.title }}</strong>
+                  <small>
+                    v{{ source.version }} · {{ source.chunk_count }} 个索引片段
+                  </small>
+                </span>
+                <ArrowUp :size="14" />
               </button>
+            </div>
+            <div v-else class="rag-source-empty">
+              管理员尚未添加有效的知识文件
+            </div>
+            <div class="rag-starter-flow">
+              <span><Files :size="14" /> 项目内置</span>
               <span><strong>24</strong> 候选召回</span>
               <span><strong>5</strong> Rerank</span>
             </div>
@@ -1310,7 +1414,9 @@ onBeforeUnmount(() => {
           class="composer"
           :class="{ dragging: draggingFiles }"
           @submit.prevent="submitMessage"
-          @dragover.prevent="draggingFiles = true"
+          @dragover.prevent="
+            draggingFiles = currentAgent?.key !== 'rag-assistant'
+          "
           @dragleave.prevent="draggingFiles = false"
           @drop.prevent="handleFileDrop"
           @keydown.esc="referenceOpen = false"
@@ -1342,8 +1448,14 @@ onBeforeUnmount(() => {
             </span>
           </div>
 
-          <div class="composer-entry">
-            <div class="composer-tools">
+          <div
+            class="composer-entry"
+            :class="{ 'no-tools': currentAgent?.key === 'rag-assistant' }"
+          >
+            <div
+              v-if="currentAgent?.key !== 'rag-assistant'"
+              class="composer-tools"
+            >
               <button
                 class="composer-tool"
                 type="button"
@@ -1381,7 +1493,7 @@ onBeforeUnmount(() => {
               v-model="input"
               rows="1"
               maxlength="20000"
-              placeholder="给 Agent 发送消息，或拖入文件"
+              :placeholder="composerPlaceholder"
               aria-label="消息内容"
               @input="resizeComposer"
               @keydown="handleComposerKeydown"
